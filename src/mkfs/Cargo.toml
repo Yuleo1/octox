@@ -1,0 +1,11 @@
+[package]
+name = "mkfs"
+version = "0.1.0"
+authors = ["Hayato Ohhashi <o8@vmm.dev>"]
+edition = "2018"
+
+[[bin]]
+name = "mkfs"
+path = "main.rs"
+
+[dependencies]

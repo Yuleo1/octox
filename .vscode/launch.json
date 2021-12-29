@@ -1,0 +1,21 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "gdb",
+            "request": "attach",
+            "name": "Debug 'kernel' with gdb",
+            "executable": "./target/kernel/riscv64gc-unknown-none-elf/debug/kernel",
+            "target": ":1234",
+            "remote": true,
+            "cwd": "${workspaceRoot}",
+            "valuesFormatting": "parseText",
+            "gdbpath": "/usr/bin/gdb-multiarch",
+            "preLaunchTask": "debug kernel start",
+            "postDebugTask": "debug kernel stop"
+        }
+    ]
+}
