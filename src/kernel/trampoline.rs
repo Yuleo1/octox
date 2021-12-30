@@ -1,4 +1,5 @@
 use core::hint::unreachable_unchecked;
+use core::arch::asm;
 
 // code to switch between user and kernel space.
 //

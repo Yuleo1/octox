@@ -1,4 +1,5 @@
 use riscv::register::*;
+use core::arch::asm;
 
 pub fn w_sstatus(sstatus: usize) {
     unsafe {

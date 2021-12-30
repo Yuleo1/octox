@@ -1,4 +1,5 @@
 use crate::start::start;
+use core::arch::asm;
 
 #[link_section = ".entry"]
 #[no_mangle]

@@ -1,5 +1,5 @@
 #![no_std]
-#![feature(asm, alloc_error_handler)]
+#![feature(alloc_error_handler)]
 #![feature(untagged_unions)]
 #![feature(nonnull_slice_from_raw_parts)]
 #![feature(new_uninit)]

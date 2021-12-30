@@ -13,6 +13,7 @@ use array_macro::array;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use core::{cell::UnsafeCell, ops::Drop, ptr::NonNull};
 use core::{mem::MaybeUninit, ptr};
+use core::arch::asm;
 use zerocopy::{AsBytes, FromBytes};
 
 pub static CPUS: Cpus = Cpus::new();

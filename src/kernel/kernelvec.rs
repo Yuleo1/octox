@@ -1,4 +1,5 @@
 use core::hint::unreachable_unchecked;
+use core::arch::asm;
 
 use crate::trap::kerneltrap;
 

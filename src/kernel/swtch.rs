@@ -1,4 +1,5 @@
 use crate::proc::Context;
+use core::arch::asm;
 
 pub extern "C" fn swtch(old: &mut Context, new: &Context) {
     unsafe {
