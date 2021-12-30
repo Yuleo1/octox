@@ -1,6 +1,6 @@
-# octox (wip)
+# octox 
 
-octox is an xv6-riscv like OS written in Rust.
+WIP. octox is an xv6-riscv like OS written in Rust.  
 
 ## Getting Started
 
@@ -13,9 +13,9 @@ octox is an xv6-riscv like OS written in Rust.
 
 ### Cargo
 
-* Build: run `cargo build`
+* Build: run `cargo build`.
 * Run: run `cargo run`, then qemu will boot octox.  
-  To exit, press Ctrl+A.
+  To exit, press `Ctrl+A` and `x`.
 
 ## License
 
