@@ -1,5 +1,5 @@
 use core::hint::unreachable_unchecked;
-
+use core::arch::asm;
 use crate::kernelvec::*;
 use crate::memlayout::*;
 use crate::param::NCPU;
@@ -31,6 +31,11 @@ pub unsafe fn start() -> ! {
     sie::set_sext();
     sie::set_ssoft();
     sie::set_stimer();
+
+    // configure Physical Memory Protection to give supervisor mode
+    // access to all of physical memory.
+    pmpaddr0::write(0x3fffffffffffff);
+    pmpcfg0::write(0xf);
 
     // ask for clock interrupts.
     timerinit();
