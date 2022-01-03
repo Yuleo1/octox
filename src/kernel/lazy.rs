@@ -1,45 +1,56 @@
+use crate::sync::Once;
 use core::cell::{Cell, UnsafeCell};
+use core::marker;
 use core::mem::MaybeUninit;
 use core::ops::Deref;
-use core::sync::atomic::{AtomicUsize, Ordering};
-
-use crate::proc::CPUS;
-
-const BLOCKED: usize = 0;
-const UNINIT: usize = 1;
-const READY: usize = 2;
-const POISONED: usize = 3;
 
 pub struct SyncOnceCell<T> {
-    state: AtomicUsize,
-    inner: UnsafeCell<MaybeUninit<T>>,
+    once: Once,
+    value: UnsafeCell<MaybeUninit<T>>,
+    _marker: marker::PhantomData<T>,
+}
+unsafe impl<T: Sync + Send> Sync for SyncOnceCell<T> {}
+unsafe impl<T: Send> Send for SyncOnceCell<T> {}
+
+impl<T: Clone> Clone for SyncOnceCell<T> {
+    fn clone(&self) -> SyncOnceCell<T> {
+        let cell = Self::new();
+        if let Some(value) = self.get() {
+            match cell.set(value.clone()) {
+                Ok(()) => (),
+                Err(_) => unreachable!(),
+            }
+        }
+        cell
+    }
 }
 
-unsafe impl<T> Send for SyncOnceCell<T> where T: Send {}
-unsafe impl<T> Sync for SyncOnceCell<T> where T: Send + Sync {}
-
-struct SyncOnceCellGuard<'a, T> {
-    oncecell: &'a SyncOnceCell<T>,
-    poison: bool,
+impl<T> From<T> for SyncOnceCell<T> {
+    fn from(value: T) -> Self {
+        let cell = Self::new();
+        match cell.set(value) {
+            Ok(()) => cell,
+            Err(_) => unreachable!(),
+        }
+    }
 }
+
+impl<T: PartialEq> PartialEq for SyncOnceCell<T> {
+    fn eq(&self, other: &SyncOnceCell<T>) -> bool {
+        self.get() == other.get()
+    }
+}
+
+impl<T: Eq> Eq for SyncOnceCell<T> {}
 
 impl<T> SyncOnceCell<T> {
-    pub const fn new() -> Self {
-        Self {
-            state: AtomicUsize::new(UNINIT),
-            inner: UnsafeCell::new(MaybeUninit::uninit()),
+    pub const fn new() -> SyncOnceCell<T> {
+        SyncOnceCell {
+            once: Once::new(),
+            value: UnsafeCell::new(MaybeUninit::uninit()),
+            _marker: marker::PhantomData,
         }
     }
-    fn try_get(&self) -> Result<&T, usize> {
-        match self.state.load(Ordering::Acquire) {
-            POISONED => panic!("poisoned"),
-            READY => Ok(unsafe { self.get_unchecked() }),
-            UNINIT => Err(UNINIT),
-            BLOCKED => Err(BLOCKED),
-            _ => unreachable!(),
-        }
-    }
-
     pub fn get(&self) -> Option<&T> {
         if self.is_initialized() {
             Some(unsafe { self.get_unchecked() })
@@ -47,39 +58,11 @@ impl<T> SyncOnceCell<T> {
             None
         }
     }
-
     pub fn get_mut(&mut self) -> Option<&mut T> {
         if self.is_initialized() {
             Some(unsafe { self.get_unchecked_mut() })
         } else {
             None
-        }
-    }
-
-    pub fn get_or_try_init(&self, func: impl FnOnce() -> T) -> Result<&T, ()> {
-        match self.try_get() {
-            Ok(res) => Ok(res),
-            Err(BLOCKED) => Err(()),
-            Err(UNINIT) => {
-                let mut func = Some(func);
-                let res = self.try_init_inner(&mut || func.take().unwrap()())?;
-                Ok(res)
-            }
-            Err(_) => unreachable!(),
-        }
-    }
-    pub fn get_or_init(&self, func: impl FnOnce() -> T) -> &T {
-        match self.get_or_try_init(func) {
-            Ok(res) => res,
-            Err(_) => {
-                let _intr_lock = CPUS.intr_lock();
-                loop {
-                    if self.state.load(Ordering::Acquire) == READY {
-                        break unsafe { self.get_unchecked() };
-                    }
-                    core::hint::spin_loop()
-                }
-            }
         }
     }
     pub fn set(&self, value: T) -> Result<(), T> {
@@ -90,72 +73,82 @@ impl<T> SyncOnceCell<T> {
             Some(value) => Err(value),
         }
     }
-
-    fn try_block(&self, order: Ordering) -> Result<SyncOnceCellGuard<'_, T>, ()> {
-        match self
-            .state
-            .compare_exchange(UNINIT, BLOCKED, order, Ordering::Relaxed)
-        {
-            Ok(prev) if prev == UNINIT => Ok(SyncOnceCellGuard {
-                oncecell: self,
-                poison: true,
-            }),
-            _ => Err(()),
+    pub fn get_or_init<F>(&self, f: F) -> &T
+    where
+        F: FnOnce() -> T,
+    {
+        match self.get_or_try_init(|| Ok::<T, !>(f())) {
+            Ok(val) => val,
+            _ => unreachable!(),
         }
     }
-
-    fn try_init_inner(&self, func: &mut dyn FnMut() -> T) -> Result<&T, ()> {
-        unsafe {
-            let mut guard = self.try_block(Ordering::Acquire)?;
-            let inner = &mut *self.inner.get();
-            inner.as_mut_ptr().write(func());
-            guard.poison = false;
+    pub fn get_or_try_init<F, E>(&self, f: F) -> Result<&T, E>
+    where
+        F: FnOnce() -> Result<T, E>,
+    {
+        if let Some(value) = self.get() {
+            return Ok(value);
         }
+        self.initialize(f)?;
+
+        debug_assert!(self.is_initialized());
+
         Ok(unsafe { self.get_unchecked() })
-    }
-
-    unsafe fn get_unchecked(&self) -> &T {
-        (&*self.inner.get()).assume_init_ref()
-    }
-
-    unsafe fn get_unchecked_mut(&mut self) -> &mut T {
-        (&mut *self.inner.get()).assume_init_mut()
-    }
-
-    fn unblock(&self, state: usize, order: Ordering) {
-        self.state.swap(state, order);
     }
 
     pub fn into_inner(mut self) -> Option<T> {
         self.take()
     }
 
-    fn is_initialized(&self) -> bool {
-        self.state.load(Ordering::Acquire) == READY
-    }
-
     pub fn take(&mut self) -> Option<T> {
         if self.is_initialized() {
-            self.state = AtomicUsize::new(UNINIT);
-            unsafe { Some((&mut *self.inner.get()).assume_init_read()) }
+            self.once = Once::new();
+            unsafe { Some((&mut *self.value.get()).assume_init_read()) }
         } else {
             None
         }
+    }
+
+    #[inline]
+    fn is_initialized(&self) -> bool {
+        self.once.is_completed()
+    }
+
+    #[cold]
+    fn initialize<F, E>(&self, f: F) -> Result<(), E>
+    where
+        F: FnOnce() -> Result<T, E>,
+    {
+        let mut res: Result<(), E> = Ok(());
+        let slot = &self.value;
+        self.once.call_once_force(|p| match f() {
+            Ok(value) => {
+                unsafe { (&mut *slot.get()).write(value) };
+            }
+            Err(e) => {
+                res = Err(e);
+                p.poison();
+            }
+        });
+        res
+    }
+
+    unsafe fn get_unchecked(&self) -> &T {
+        debug_assert!(self.is_initialized());
+        (&*self.value.get()).assume_init_ref()
+    }
+
+    unsafe fn get_unchecked_mut(&mut self) -> &mut T {
+        debug_assert!(self.is_initialized());
+        (&mut *self.value.get()).assume_init_mut()
     }
 }
 
 impl<T> Drop for SyncOnceCell<T> {
     fn drop(&mut self) {
         if self.is_initialized() {
-            unsafe { (&mut *self.inner.get()).assume_init_drop() }
+            unsafe { (&mut *self.value.get()).assume_init_drop() };
         }
-    }
-}
-
-impl<'a, T: 'a> Drop for SyncOnceCellGuard<'a, T> {
-    fn drop(&mut self) {
-        let state = if self.poison { POISONED } else { READY };
-        self.oncecell.unblock(state, Ordering::AcqRel);
     }
 }
 
