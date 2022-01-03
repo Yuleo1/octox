@@ -8,12 +8,12 @@ use crate::vm::{Addr, KVAddr, Page, PageAllocator, PteFlags, UVAddr, Uvm, VAddr,
 use crate::{param::*, riscv::*, trampoline::trampoline};
 use crate::{print, println};
 use alloc::string::String;
+use alloc::vec;
 use alloc::{boxed::Box, sync::Arc};
 use array_macro::array;
+use core::arch::asm;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use core::{cell::UnsafeCell, ops::Drop, ptr::NonNull};
-use core::{mem::MaybeUninit, ptr};
-use core::arch::asm;
 use zerocopy::{AsBytes, FromBytes};
 
 pub static CPUS: Cpus = Cpus::new();
@@ -349,25 +349,22 @@ impl<'a> Drop for IntrLock<'a> {
 
 impl Procs {
     pub fn new() -> Self {
-        unsafe {
-            let mut data: [MaybeUninit<Arc<Proc>>; NPROC] = MaybeUninit::uninit().assume_init();
-            for elem in &mut data[..] {
-                ptr::write(elem.as_mut_ptr(), Arc::new(Proc::new()));
-            }
-            Self {
-                pool: core::mem::transmute::<_, [Arc<Proc>; NPROC]>(data),
-                wait_lock: Mutex::new((), "wait lock"),
-            }
+        Self {
+            pool: vec![Arc::new(Proc::new()); NPROC].try_into().unwrap(),
+            wait_lock: Mutex::new((), "wait lock"),
         }
     }
     // Allocate a page for each process's kernel stack.
     // map it high in memory, followed by an invalid
     // guard page.
     pub unsafe fn proc_mapstacks(&self) {
+        use crate::vm::Stack;
         for (p, _) in self.pool.iter().enumerate() {
-            let pa = Page::try_new_zeroed().unwrap();
+            let pa = Stack::try_new_zeroed().unwrap();
             let va = kstack(p).into();
-            KVM.map(va, pa.into(), PGSIZE, PteFlags::RW);
+            KVM.get_mut()
+                .unwrap()
+                .map(va, pa.into(), PGSIZE, PteFlags::RW);
         }
     }
 

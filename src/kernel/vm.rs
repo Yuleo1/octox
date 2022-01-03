@@ -1,6 +1,7 @@
+use crate::lazy::SyncOnceCell;
 use crate::memlayout::{KERNBASE, PHYSTOP, PLIC, TRAMPOLINE, TRAPFLAME, UART0, VIRTIO0};
 use crate::proc::PROCS;
-use crate::riscv::{pgroundup, PGSHIFT, PGSIZE, STAP_SV39};
+use crate::riscv::{make_satp, pgroundup, PGSHIFT, PGSIZE};
 use alloc::boxed::Box;
 use bitflags::bitflags;
 use core::cmp::{Ord, PartialEq, PartialOrd};
@@ -17,8 +18,7 @@ extern "C" {
     fn etext();
 }
 
-#[used]
-pub static mut KVM: Kvm = Kvm::new();
+pub static mut KVM: SyncOnceCell<Kvm> = SyncOnceCell::new();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
@@ -134,7 +134,7 @@ impl_vaddr!(UVAddr);
 
 pub trait PageAllocator: Sized {
     fn try_new_zeroed() -> Option<usize> {
-        match Box::<Page>::try_new_zeroed() {
+        match Box::<Self>::try_new_zeroed() {
             Ok(mem) => Some(unsafe { Box::into_raw(mem.assume_init()) } as usize),
             Err(_) => None,
         }
@@ -145,13 +145,47 @@ pub trait PageAllocator: Sized {
 pub struct Page([u8; 4096]);
 impl PageAllocator for Page {}
 
+pub struct Stack([u8; 4096 * 4]);
+impl PageAllocator for Stack {}
+
 #[derive(Debug, Clone, Copy)]
 #[repr(C, align(4096))]
-pub struct PageTable<V: VAddr> {
-    pub entries: [PageTableEntry; 512],
-    _marker: PhantomData<V>,
+struct RawPageTable {
+    entries: [PageTableEntry; 512],
 }
-impl<V: VAddr> PageAllocator for PageTable<V> {}
+impl PageAllocator for RawPageTable {}
+
+impl RawPageTable {
+    pub fn new() -> Option<*mut Self> {
+        Some(RawPageTable::try_new_zeroed()? as *mut Self)
+    }
+}
+
+impl Index<usize> for RawPageTable {
+    type Output = PageTableEntry;
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.entries[index]
+    }
+}
+
+impl IndexMut<usize> for RawPageTable {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.entries[index]
+    }
+}
+
+impl Deref for RawPageTable {
+    type Target = [PageTableEntry; 512];
+    fn deref(&self) -> &Self::Target {
+        &self.entries
+    }
+}
+
+impl DerefMut for RawPageTable {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.entries
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 #[repr(transparent)]
@@ -214,42 +248,22 @@ impl PageTableEntry {
     }
 }
 
-impl<V: VAddr> Index<usize> for PageTable<V> {
-    type Output = PageTableEntry;
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.entries[index]
-    }
-}
-
-impl<V: VAddr> IndexMut<usize> for PageTable<V> {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut self.entries[index]
-    }
-}
-
-impl<V: VAddr> Deref for PageTable<V> {
-    type Target = [PageTableEntry; 512];
-    fn deref(&self) -> &Self::Target {
-        &self.entries
-    }
-}
-
-impl<V: VAddr> DerefMut for PageTable<V> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.entries
-    }
+#[derive(Debug, Clone, Copy)]
+pub struct PageTable<V: VAddr> {
+    ptr: *mut RawPageTable,
+    _marker: PhantomData<V>,
 }
 
 impl<V: VAddr> PageTable<V> {
-    pub const fn new() -> Self {
-        Self {
-            entries: [PageTableEntry(0); 512],
+    pub fn new() -> Option<Self> {
+        Some(Self {
+            ptr: RawPageTable::new()?,
             _marker: PhantomData,
-        }
+        })
     }
 
     pub fn as_satp(&self) -> usize {
-        STAP_SV39 | ((self.entries.as_ptr() as usize) >> PGSHIFT)
+        make_satp(self.ptr as usize)
     }
 
     // Find the address of the PTE in page table pagetable
@@ -265,7 +279,7 @@ impl<V: VAddr> PageTable<V> {
     //   12..20 -- 9 bits of level-0 index.
     //    0..11 -- 12 bits of byte offset within the page.
     pub fn walk(&mut self, va: V, alloc: bool) -> Option<&mut PageTableEntry> {
-        let mut pagetable = self as *mut PageTable<V>;
+        let mut pagetable = self.ptr;
         if va.into_usize() >= V::MAXVA {
             panic!("walk");
         }
@@ -273,12 +287,12 @@ impl<V: VAddr> PageTable<V> {
         for level in (1..3).rev() {
             let pte = unsafe { (*pagetable).get_mut(va.px(level))? };
             if pte.is_v() {
-                pagetable = pte.to_pa().into_usize() as *mut PageTable<V>;
+                pagetable = pte.to_pa().into_usize() as *mut RawPageTable;
             } else {
                 if !alloc {
                     return None;
                 }
-                pagetable = PageTable::<V>::try_new_zeroed()? as *mut PageTable<V>;
+                pagetable = RawPageTable::new()?;
                 pte.set(pagetable as usize, PteFlags::V);
             }
         }
@@ -331,7 +345,8 @@ impl<V: VAddr> PageTable<V> {
     // Recursively free page-table pages.
     // All leaf mappings must be already have been removed.
     pub fn freewalk(&mut self) {
-        for pte in self.iter_mut() {
+        let pagetable = unsafe { &mut *self.ptr };
+        for pte in pagetable.iter_mut() {
             if pte.is_v() && !pte.is_leaf() {
                 let child: &mut PageTable<V> =
                     unsafe { &mut *(pte.to_pa().into_usize() as *mut _) };
@@ -346,7 +361,6 @@ impl<V: VAddr> PageTable<V> {
 }
 
 #[derive(Debug, Clone, Copy)]
-#[repr(transparent)]
 pub struct Uvm {
     page_table: PageTable<UVAddr>,
 }
@@ -615,7 +629,6 @@ impl Uvm {
 }
 
 #[derive(Debug, Clone, Copy)]
-#[repr(transparent)]
 pub struct Kvm {
     page_table: PageTable<KVAddr>,
 }
@@ -634,10 +647,10 @@ impl DerefMut for Kvm {
 }
 
 impl Kvm {
-    pub const fn new() -> Self {
-        Self {
-            page_table: PageTable::new(),
-        }
+    pub fn new() -> Option<Self> {
+        Some(Self {
+            page_table: PageTable::new()?,
+        })
     }
     // add a mapping to the kernel page table.
     // only used when booting.
@@ -687,14 +700,17 @@ impl Kvm {
 }
 // Initialize the one kernel_pagetable
 pub fn kinit() {
-    unsafe { KVM.make() }
+    unsafe {
+        KVM.set(Kvm::new().unwrap()).unwrap();
+        KVM.get_mut().unwrap().make();
+    }
 }
 
 // Switch h/w page table register to the kernel's page table,
 // and enable paging.
 pub fn kinithart() {
     unsafe {
-        satp::write(KVM.as_satp());
+        satp::write(KVM.get().unwrap().as_satp());
         sfence_vma(0, 0);
     }
 }
