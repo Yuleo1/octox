@@ -10,7 +10,7 @@ pub unsafe extern "C" fn _entry() -> ! {
     // sp = stack0 + (hartid * 4096)
     asm!(
         "la sp, STACK0",
-        "li a0, 4096",
+        "li a0, 4096 * 4",
         "csrr a1, mhartid",
         "addi a1, a1, 1",
         "mul a0, a0, a1",

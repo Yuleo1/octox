@@ -1,15 +1,15 @@
-use core::hint::unreachable_unchecked;
-use core::arch::asm;
 use crate::kernelvec::*;
 use crate::memlayout::*;
 use crate::param::NCPU;
+use core::arch::asm;
+use core::hint::unreachable_unchecked;
 use riscv::register::*;
 
 #[repr(C, align(16))]
-struct Stack([u8; 4096 * NCPU]);
+struct Stack([u8; 4096 * 4 * NCPU]);
 
 #[no_mangle]
-static mut STACK0: Stack = Stack([0; 4096 * NCPU]);
+static mut STACK0: Stack = Stack([0; 4096 * 4 * NCPU]);
 
 pub unsafe fn start() -> ! {
     // set MPP mode to Supervisor, for mret
