@@ -5,10 +5,11 @@ extern crate alloc;
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use kernel::{
-    console, kalloc, kmain, plic, print, println,
+    bio, console, kalloc, kmain, plic, print, println,
     proc::{self, Cpus},
-    trap, vm, bio,
+    trap, vm,
 };
+
 static STARTED: AtomicBool = AtomicBool::new(false);
 
 kmain!(main);

@@ -53,7 +53,10 @@ impl Log {
             outstanding: 0,
             committing: false,
             dev: 0,
-            lh: LogHeader { n: 0, block: [0; LOGSIZE] },
+            lh: LogHeader {
+                n: 0,
+                block: [0; LOGSIZE],
+            },
         }
     }
 }

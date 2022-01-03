@@ -1,5 +1,5 @@
-use core::hint::unreachable_unchecked;
 use core::arch::asm;
+use core::hint::unreachable_unchecked;
 
 use crate::trap::kerneltrap;
 
