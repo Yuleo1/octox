@@ -12,7 +12,7 @@ WIP. octox is an xv6-riscv like OS written in Rust.
 
 ### Build and Run
 
-* Add target(`rustup target add riscv64gc-unknown-none-elf`)
+* Add target(`riscv64gc-unknown-none-elf`)
   ```
   git clone https://github.com/o8vm/octox.git
   cd octox
