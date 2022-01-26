@@ -8,4 +8,8 @@ edition = "2018"
 name = "mkfs"
 path = "main.rs"
 
+[lib]
+path = "../kernel/lib.rs"
+
 [dependencies]
+zerocopy = "0.6.0"
