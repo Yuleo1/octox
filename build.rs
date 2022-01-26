@@ -16,17 +16,24 @@ fn main() {
     // Build sub projects
 
     // Build mkfs: target = host
-    let target_triple = env::var("HOST").expect("missing host triple");
+    let mkfs_target_triple = env::var("HOST").expect("missing host triple");
     let mkfs_dir = manifest_dir.join("src").join("mkfs");
-    build_subproject(&mkfs_dir, &target_dir, cargo, &target_triple);
+    build_subproject(&mkfs_dir, &target_dir, cargo, &mkfs_target_triple);
 
     // Build user programs: target = riscv64gc-unknown-none-elf
     //let target_triple = env::var("TARGET").expect("missing target triple");
     //let user_dir = manifest_dir.join("user");
     //build_subproject(&user_dir, &target_dir, cargo, &target_triple);
+    // let uprogs = todo
 
     // Build fs.img
-    // todo
+    let mut mkfs_cmd = Command::new(target_dir.join("mkfs").join(mkfs_target_triple).join("release").join("mkfs"));
+    mkfs_cmd.current_dir(target_dir);
+    mkfs_cmd
+    .arg("fs.img")
+    .arg("../README.md");
+    // .args(uprogs);
+    mkfs_cmd.status().expect("mkfs failed!");
 
     // linker script for kernel
     println!("cargo:rustc-link-arg=-Tsrc/kernel/kernel.ld");
