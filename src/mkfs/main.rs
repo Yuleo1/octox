@@ -30,7 +30,12 @@ impl FsImg {
     fn new<P: AsRef<Path>>(sb: SuperBlock, path: P) -> Result<Self, std::io::Error> {
         Ok(Self {
             sb,
-            img: OpenOptions::new().create(true).write(true).truncate(true).read(true).open(path)?,
+            img: OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .read(true)
+                .open(path)?,
             freeinode: 1,
             freeblock: NMETA, // the first free block that we can allocate
         })
