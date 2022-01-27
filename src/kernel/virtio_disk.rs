@@ -409,7 +409,7 @@ impl Disk {
 
 impl Mutex<Disk> {
     pub fn rw(&self, b: &'static Arc<Buf>, raw_data: *const [u8; BSIZE], write: bool) {
-        let sector = b.ctrl.read().blockno * (BSIZE / 512);
+        let sector = b.ctrl.read().blockno as usize * (BSIZE / 512);
 
         let mut guard = self.lock();
         let p = CPUS.my_proc().unwrap();
