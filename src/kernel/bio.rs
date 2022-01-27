@@ -40,22 +40,10 @@ pub struct Ctrl {
     prev: Option<Weak<Buf>>,
 }
 
-pub struct BufGuard {
-    sleeplock: SleepLockGuard<'static, [u8; BSIZE]>,
-    buf: Arc<Buf>,
-}
-
-impl Deref for BufGuard {
-    type Target = SleepLockGuard<'static, [u8; BSIZE]>;
-    fn deref(&self) -> &Self::Target {
-        &self.sleeplock
-    }
-}
-
-impl DerefMut for BufGuard {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.sleeplock
-    }
+pub struct BufGuard<'a> {
+    sleeplock: Option<SleepLockGuard<'static, [u8; BSIZE]>>,
+    buf: Option<Arc<Buf>>,
+    bcache: &'a BCache,
 }
 
 pub struct BCache {
@@ -199,8 +187,9 @@ impl BCache {
             let ctrl = b.ctrl.read();
             if ctrl.dev == dev && ctrl.blockno == blockno {
                 return BufGuard {
-                    sleeplock: b.data.lock(),
-                    buf: Arc::clone(b),
+                    sleeplock: Some(b.data.lock()),
+                    buf: Some(Arc::clone(b)),
+                    bcache: self,
                 };
             }
         }
@@ -215,8 +204,9 @@ impl BCache {
                 ctrl.blockno = blockno;
                 ctrl.valid = false;
                 return BufGuard {
-                    sleeplock: b.data.lock(),
-                    buf: Arc::clone(b),
+                    sleeplock: Some(b.data.lock()),
+                    buf: Some(Arc::clone(b)),
+                    bcache: self,
                 };
             }
         }
@@ -226,25 +216,15 @@ impl BCache {
     // Return a locked buf with the contents of the indicated block.
     pub fn read(&self, dev: u32, blockno: u32) -> BufGuard {
         let b = self.get(dev, blockno);
-        if !b.buf.ctrl.read().valid {
+        if !b.buf.as_ref().unwrap().ctrl.read().valid {
             DISK.rw(b.buf(), b.raw_data(), false);
-            b.buf.ctrl.write().valid = true;
+            b.buf.as_ref().unwrap().ctrl.write().valid = true;
         }
         b
     }
-
-    pub fn relse(&self, guard: BufGuard) {
-        if !guard.holding() {
-            panic!("brelse");
-        }
-        SleepLock::unlock(guard.sleeplock);
-
-        let mut lru = self.lru.lock();
-        lru.relse(guard.buf);
-    }
 }
 
-impl BufGuard {
+impl<'a> BufGuard<'a> {
     // Write buf's content to disk. Must be locked.
     pub fn write(&self) {
         if !self.holding() {
@@ -258,15 +238,39 @@ impl BufGuard {
     }
 
     pub fn buf(&self) -> &'static Arc<Buf> {
-        unsafe { &*(&self.buf as *const _) }
+        unsafe { &*(self.buf.as_ref().unwrap() as *const _) }
     }
 
     pub unsafe fn pin(&self) {
-        Arc::decrement_strong_count(Arc::as_ptr(&self.buf));
+        Arc::decrement_strong_count(Arc::as_ptr(self.buf.as_ref().unwrap()));
     }
 
     pub unsafe fn unpin(&self) {
-        Arc::increment_strong_count(Arc::as_ptr(&self.buf))
+        Arc::increment_strong_count(Arc::as_ptr(self.buf.as_ref().unwrap()))
+    }
+}
+
+impl<'a> Deref for BufGuard<'a> {
+    type Target = SleepLockGuard<'static, [u8; BSIZE]>;
+    fn deref(&self) -> &Self::Target {
+        self.sleeplock.as_ref().unwrap()
+    }
+}
+
+impl<'a> DerefMut for BufGuard<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.sleeplock.as_mut().unwrap()
+    }
+}
+
+impl<'a> Drop for BufGuard<'a> {
+    fn drop(&mut self) {
+        if !self.holding() {
+            panic!("drop - brelse");
+        }
+        SleepLock::unlock(self.sleeplock.take().unwrap());
+        let mut lru = self.bcache.lru.lock();
+        lru.relse(self.buf.take().unwrap());
     }
 }
 
