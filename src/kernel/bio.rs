@@ -34,8 +34,8 @@ pub struct Buf {
 pub struct Ctrl {
     valid: bool,    // has data been read from disk?
     pub disk: bool, // does disk "own" buf?
-    dev: usize,
-    pub blockno: usize,
+    dev: u32,
+    pub blockno: u32,
     next: Option<Arc<Buf>>,
     prev: Option<Weak<Buf>>,
 }
@@ -192,7 +192,7 @@ impl BCache {
         }
     }
 
-    fn get(&self, dev: usize, blockno: usize) -> BufGuard {
+    fn get(&self, dev: u32, blockno: u32) -> BufGuard {
         let lru = self.lru.lock();
         // Is the block already cached?
         for b in lru.iter() {
@@ -224,7 +224,7 @@ impl BCache {
     }
 
     // Return a locked buf with the contents of the indicated block.
-    pub fn read(&self, dev: usize, blockno: usize) -> BufGuard {
+    pub fn read(&self, dev: u32, blockno: u32) -> BufGuard {
         let b = self.get(dev, blockno);
         if !b.buf.ctrl.read().valid {
             DISK.rw(b.buf(), b.raw_data(), false);
