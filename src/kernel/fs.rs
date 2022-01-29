@@ -1,9 +1,23 @@
 use zerocopy::AsBytes;
-
 use crate::stat::IType;
+use crate::lazy::SyncOnceCell;
+
+// File system implementation. Five layers:
+//   - Blocks: allocator for raw disk blocks.
+//   - Log: crash recovery for multi-step updates.
+//   - Files: inode allocator, reading, writing, metadata.
+//   - Directries: inode with special contents (list of other inodes!)
+//   - Names: paths like /usr/rtm/octox/fs.c for convenient naming.
+//
+// This file contains the low-level file system manipulation
+// routines. The (higher-level) system call implementations
+// are in sysfile.rs
 
 pub const ROOTINO: u32 = 1; // root i-number
 pub const BSIZE: usize = 1024; // block size
+
+#[cfg(target_os = "none")]
+pub static SB: SyncOnceCell<SuperBlock> = SyncOnceCell::new();
 
 // Disk layout:
 // [ root block | super block | log | inode blocks |
