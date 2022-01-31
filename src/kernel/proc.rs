@@ -8,7 +8,7 @@ use crate::vm::{Addr, KVAddr, Page, PageAllocator, PteFlags, UVAddr, Uvm, VAddr,
 use crate::{param::*, riscv::*, trampoline::trampoline};
 use crate::{print, println};
 use alloc::string::String;
-use alloc::vec;
+use alloc::vec::Vec;
 use alloc::{boxed::Box, sync::Arc};
 use array_macro::array;
 use core::arch::asm;
@@ -350,7 +350,7 @@ impl<'a> Drop for IntrLock<'a> {
 impl Procs {
     pub fn new() -> Self {
         Self {
-            pool: vec![Arc::new(Proc::new()); NPROC].try_into().unwrap(),
+            pool: core::iter::repeat(Arc::new(Proc::new())).take(NPROC).collect::<Vec<_>>().try_into().unwrap(),
             wait_lock: Mutex::new((), "wait lock"),
         }
     }
