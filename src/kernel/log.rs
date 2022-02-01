@@ -3,7 +3,7 @@ use crate::{
     lazy::SyncLazy,
     param::{LOGSIZE, ROOTDEV, MAXOPBLOCKS},
     spinlock::Mutex,
-    fs::SB, bio::{BCACHE, BufGuard}, proc::{CPUS, Process, PROCS},
+    fs::{SB, BSIZE}, bio::{BCACHE, BufGuard}, proc::{CPUS, Process, PROCS},
 };
 
 // Simple logging that allows concurrent FS system calls.
@@ -128,6 +128,10 @@ impl Log {
 }
 
 impl Mutex<Log> {
+    pub fn init(&self) {
+        // SyncLazy initialization
+        assert!(core::mem::size_of::<LogHeader>() >= BSIZE, "initlog: too big log header");
+    }
     // called at the start of each FS system call.
     pub fn begin_op(&self) {
         let mut guard = self.lock();
