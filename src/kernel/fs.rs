@@ -224,4 +224,11 @@ pub struct inode {
     dev: u32,
     inum: u32,
     // use Arc instead of using refcount field.
+    valid: bool,
+    itype: IType,
+    major: u16,
+    minor: u16,
+    nlink: u16,
+    size: u32,
+    addrs: [u32; NDIRECT + 1],
 }
