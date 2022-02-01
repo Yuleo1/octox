@@ -350,7 +350,7 @@ impl<'a> Drop for IntrLock<'a> {
 impl Procs {
     pub fn new() -> Self {
         Self {
-            pool: core::iter::repeat(Arc::new(Proc::new())).take(NPROC).collect::<Vec<_>>().try_into().unwrap(),
+            pool: core::iter::repeat_with(|| Arc::new(Proc::new())).take(NPROC).collect::<Vec<_>>().try_into().unwrap(),
             wait_lock: Mutex::new((), "wait lock"),
         }
     }
