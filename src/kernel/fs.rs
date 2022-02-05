@@ -3,7 +3,7 @@ use zerocopy::AsBytes;
 use crate::bio::BCACHE;
 use crate::log::LOG;
 use crate::param::NINODE;
-use crate::sleeplock::SleepLock;
+use crate::sleeplock::{SleepLock, SleepLockGuard};
 use crate::spinlock::Mutex;
 use crate::stat::IType;
 use crate::lazy::{SyncOnceCell, SyncLazy};
@@ -244,6 +244,32 @@ struct IData {
     addrs: [u32; NDIRECT + 1],
 }
 
+impl IData {
+    // Copy a modified in-memory inode to disk.
+    // Must be called after every change to an inode field
+    // that lives on disk.
+    // Caller must hold inode sleeplock.
+    fn update(&self, dev: u32, inum: u32) {
+        let sb = SB.get().unwrap();
+        let mut bp = BCACHE.read(dev, sb.iblock(inum));
+        let (head, dip, _) = unsafe { bp.align_to_mut::<DInode>() };
+        assert!(head.is_empty(), "Data was not aligned");
+        let dip = dip.get_mut(inum as usize % IPB).unwrap();
+        dip.itype = self.itype;
+        dip.major = self.major;
+        dip.minor = self.minor;
+        dip.nlink = self.nlink;
+        dip.size = self.size;
+        dip.addrs.copy_from_slice(&self.addrs);
+        LOG.write(bp);
+    }
+
+    // Trancate inode (discard contents).
+    // Caller must hold inode sleeplock.
+    fn trunc(&mut self) {
+
+    }
+}
 
 impl Inode {
     fn new(dev: u32, inum: u32) -> Self {
@@ -252,6 +278,9 @@ impl Inode {
             inum,
             data: SleepLock::new(Default::default(), "inode"),
         }
+    }
+    fn ilock(&self) -> SleepLockGuard<IData> {
+        todo!()
     }
 }
 
@@ -263,9 +292,18 @@ impl Mutex<[Option<Arc<Inode>>; NINODE]> {
     pub fn alloc(&self, dev: u32, itype: IType) -> Arc<Inode> {
         let sb = SB.get().unwrap();
         for inum in 1..sb.ninodes {
-            let bp = BCACHE.read(dev, sb.iblock(inum));
+            let mut bp = BCACHE.read(dev, sb.iblock(inum));
+            let (head, dip, _) = unsafe { bp.align_to_mut::<DInode>() };
+            assert!(head.is_empty(), "Data was not aligned");
+            let dip = dip.get_mut(inum as usize % IPB).unwrap();
+            if dip.itype == IType::None { // a free inode
+                *dip = Default::default();
+                dip.itype = itype;
+                LOG.write(bp);
+                return self.get(dev, inum);
+            }
         }
-        todo!()
+        unreachable!("ialloc: no inodes");
     }
 
     // Find the inode with number inum on device dev
@@ -281,7 +319,7 @@ impl Mutex<[Option<Arc<Inode>>; NINODE]> {
                 Some(ip) if ip.dev == dev && ip.inum == inum => {
                     return Arc::clone(ip);
                 },
-                None => {
+                None if empty.is_none() => {
                     empty = ip;
                 }
                 _ => (),
@@ -304,5 +342,16 @@ impl Mutex<[Option<Arc<Inode>>; NINODE]> {
     // to it, free the inode (and its content) on disk.
     // All calls to iput() must be inside a transaction in
     // case it has to free the inode.
+    fn put(&self, inode: Arc<Inode>) {
+        if Arc::strong_count(&inode) == 2 {
+            // Arc::strong_count(inode) == 2 means no other process can have ip locked,
+            // so this sleeplock won't block (or dead lock).
+            let idata = inode.data.lock();
+            if idata.valid && idata.nlink == 0 {
+                // inode has no links and no other references: truncate and free.
+
+            }
+        }
+    }
 
 }
