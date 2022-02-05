@@ -1,8 +1,12 @@
+use alloc::sync::Arc;
 use zerocopy::AsBytes;
 use crate::bio::BCACHE;
 use crate::log::LOG;
+use crate::param::NINODE;
+use crate::sleeplock::SleepLock;
+use crate::spinlock::Mutex;
 use crate::stat::IType;
-use crate::lazy::SyncOnceCell;
+use crate::lazy::{SyncOnceCell, SyncLazy};
 
 // File system implementation. Five layers:
 //   - Blocks: allocator for raw disk blocks.
@@ -219,11 +223,18 @@ fn bfree(dev: u32, b: u32) {
 // dev, and inum. One must hold ip.lock in order to 
 // read or write that inode's ip.valid, ip.size, ip.type, &c.
 
+
+pub static ITABLE: SyncLazy<Mutex<[Option<Arc<Inode>>; NINODE]>> = SyncLazy::new(|| todo!());
+
 // in-memory copy of an inode
-pub struct inode {
+pub struct Inode {
     dev: u32,
     inum: u32,
-    // use Arc instead of using refcount field.
+    data: SleepLock<IData>,
+}
+
+#[derive(Debug, Default)]
+struct IData {
     valid: bool,
     itype: IType,
     major: u16,
@@ -231,4 +242,67 @@ pub struct inode {
     nlink: u16,
     size: u32,
     addrs: [u32; NDIRECT + 1],
+}
+
+
+impl Inode {
+    fn new(dev: u32, inum: u32) -> Self {
+        Self {
+            dev,
+            inum,
+            data: SleepLock::new(Default::default(), "inode"),
+        }
+    }
+}
+
+impl Mutex<[Option<Arc<Inode>>; NINODE]> {
+
+    // Allocate an inode on device dev.
+    // Mark it as allocated by giving it type.
+    // Returns an unlocked but allocated and referenced inode.
+    pub fn alloc(&self, dev: u32, itype: IType) -> Arc<Inode> {
+        let sb = SB.get().unwrap();
+        for inum in 1..sb.ninodes {
+            let bp = BCACHE.read(dev, sb.iblock(inum));
+        }
+        todo!()
+    }
+
+    // Find the inode with number inum on device dev
+    // and return the in-memoroy copy. Does not lock
+    // the inode and does not read it from disk.
+    fn get(&self, dev: u32, inum: u32) -> Arc<Inode> {
+        let mut guard = self.lock();
+
+        // Is the inode already in the table?
+        let mut empty = &mut None;
+        for ip in guard.iter_mut() {
+            match ip {
+                Some(ip) if ip.dev == dev && ip.inum == inum => {
+                    return Arc::clone(ip);
+                },
+                None => {
+                    empty = ip;
+                }
+                _ => (),
+            }
+        }
+        
+        // Recycle an inode entry
+        if empty.is_none() {
+            panic!("iget: no inodes");
+        }
+        let ip = Arc::new(Inode::new(dev, inum));
+        empty.replace(Arc::clone(&ip));
+        ip
+    }
+
+    // Drop a reference to an in-memory inode.
+    // If that was the last reference, the inode table entry can
+    // be recycled.
+    // If that was the last reference and the inode has no links
+    // to it, free the inode (and its content) on disk.
+    // All calls to iput() must be inside a transaction in
+    // case it has to free the inode.
+
 }
