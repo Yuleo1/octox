@@ -244,6 +244,7 @@ struct IData {
     addrs: [u32; NDIRECT + 1],
 }
 
+
 impl IData {
     // Copy a modified in-memory inode to disk.
     // Must be called after every change to an inode field
@@ -266,8 +267,30 @@ impl IData {
 
     // Trancate inode (discard contents).
     // Caller must hold inode sleeplock.
-    fn trunc(&mut self) {
-
+    fn trunc(&mut self, dev: u32, inum: u32) {
+        for addr in self.addrs.iter_mut().take(NDIRECT) {
+            if *addr > 0 {
+                bfree(dev, *addr);
+                *addr = 0;
+            }
+        }
+        
+        let naddr = self.addrs.get_mut(NDIRECT).unwrap();
+        if  *naddr > 0 {
+            let bp = BCACHE.read(dev, *naddr);
+            let (head, a, _) = unsafe { bp.align_to::<u32>() };
+            assert!(head.is_empty(), "Data was not aligned");
+            for &addr in a.iter() { // 0 .. NINDIRECT = BISIZE / u32
+                if addr > 0 {
+                    bfree(dev, addr);
+                }
+            }
+            drop(bp);
+            bfree(dev, *naddr);
+            *naddr = 0;
+        }
+        self.size = 0;
+        self.update(dev, inum);
     }
 }
 
@@ -343,13 +366,31 @@ impl Mutex<[Option<Arc<Inode>>; NINODE]> {
     // All calls to iput() must be inside a transaction in
     // case it has to free the inode.
     fn put(&self, inode: Arc<Inode>) {
+        let mut guard = self.lock();
+
         if Arc::strong_count(&inode) == 2 {
-            // Arc::strong_count(inode) == 2 means no other process can have ip locked,
+            // Arc::strong_count(inode) == 2 means no other process can have inode sleeplocked,
             // so this sleeplock won't block (or dead lock).
-            let idata = inode.data.lock();
+            let mut idata = inode.data.lock();
+            let itable = Mutex::unlock(guard);
+
             if idata.valid && idata.nlink == 0 {
                 // inode has no links and no other references: truncate and free.
+                idata.trunc(inode.dev, inode.inum);
+                idata.itype = IType::None;
+                idata.update(inode.dev, inode.inum);
+                idata.valid = false;
+            }
 
+            guard = itable.lock();
+            // drop in-memory inode.
+            for mip in guard.iter_mut() {
+                match mip {
+                    Some(ip) if Arc::ptr_eq(&inode, ip) => {
+                        mip.take();
+                    },
+                    _ => (),
+                }
             }
         }
     }
