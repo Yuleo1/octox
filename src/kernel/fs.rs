@@ -178,15 +178,15 @@ fn bfree(dev: u32, b: u32) {
 // rest og the file system code.
 //
 // * Allocation: an inode is allocated if its type (on disk)
-//   is non-zero. ialloc() allocates, and iput() frees if
+//   is non-zero. alloc() allocates, and put() frees if
 //   the reference and link counts have fallen to zero.
 //
 // * Referencing in table: an entry in the inode table
-//   is free if ip.ref is zero. Otherwise ip.ref tracks
-//   the number of in-memory pointers to the entry (open
-//   files and current directories). iget() finds or
-//   creates a table entry and increments its ref; iput()
-//   decrements ref.
+//   is free if Arc::strong_count(&Arc<MInode>) is zero. Otherwise 
+//   Arc count tracks the number of in-memory pointers to
+//   the entry (open files and current directories). 
+//   get() finds or creates a table entry and increments 
+//   its Arc count; iput() comsume Arc<inode>.
 // 
 // * Valid: the information (type, size, &c) in an inode
 //   table entry is only correct when ip.valid is 1.
@@ -199,11 +199,11 @@ fn bfree(dev: u32, b: u32) {
 //   has first locked the inode.
 //
 // Thus a typical sequence is:
-//   ip = iget(dev, inum);
-//   ilock(ip)
+//   ip = iget(dev, inum);  // get inode
+//   guard = ilock(ip);     // return SleeplockGuard
 //   .. examine and modify ip.xxx
-//   iunlock(ip)
-//   iput(ip)
+//   // drop(guard)
+//   // drop(inode)
 //
 // ilock() is separate from iget() so that system calls can
 // get a long-term reference to an inode (as for an open file)
@@ -309,6 +309,20 @@ impl IData {
         self.size = 0;
         self.update();
     }
+
+    // Inode content
+    //
+    // The content (data) associated with each inode is stored
+    // in blocks on the disk. The first NDIRECT block numbers
+    // are listed in idata.addrs[]. The next NINDIRECT blocks
+    // are listed in block idata.addrs[NDIRECT].
+    // 
+    // Retun the disk block address of the nth block in inode ip.
+    // If there is no such block, bmap allocates one.
+    pub fn bmap(&mut self, bn: u32) -> Result<u32, &'static str> {
+
+        Err("bmap: out of range")
+    }
 }
 
 impl MInode {
@@ -320,6 +334,11 @@ impl MInode {
         }
     }
 
+    // unlock function is no need.
+    // because SleepLockGuard impl Drop trait.
+
+    // Lock the inode
+    // Reads the inode from disk if necessary.
     fn lock(&self) -> SleepLockGuard<IData> {
         let sb = SB.get().unwrap();
         let mut guard = self.data.lock();
@@ -352,17 +371,25 @@ impl Inode {
             ip: Some(ip)
         }
     }
-
-    // Lock the inode
-    // Reads the inode from disk if necessary.
-    pub fn lock(&self) -> SleepLockGuard<IData> {
-        self.ip.as_ref().unwrap().lock()
+    // Increments reference count fot Inode.
+    // Return cloned Inode to enable ip = ip1.dup() idiom.
+    pub fn dup(&self) -> Self {
+        Self {
+            ip: Some(Arc::clone(self.ip.as_ref().unwrap()))
+        }
     }
 }
 
 impl Drop for Inode {
     fn drop(&mut self) {
         ITABLE.put(self.ip.take().unwrap());
+    }
+}
+
+impl Deref for Inode {
+    type Target = MInode;
+    fn deref(&self) -> &Self::Target {
+        self.ip.as_ref().unwrap()
     }
 }
 
@@ -373,7 +400,7 @@ impl ITable {
     // Allocate an inode on device dev.
     // Mark it as allocated by giving it type.
     // Returns an unlocked but allocated and referenced inode.
-    pub fn alloc(&self, dev: u32, itype: IType) -> Inode {
+    pub fn alloc(&self, dev: u32, itype: IType) -> Inode { // todo: use Result 
         let sb = SB.get().unwrap();
         for inum in 1..sb.ninodes {
             let mut bp = BCACHE.read(dev, sb.iblock(inum));
@@ -393,7 +420,7 @@ impl ITable {
     // Find the inode with number inum on device dev
     // and return the in-memoroy copy. Does not lock
     // the inode and does not read it from disk.
-    fn get(&self, dev: u32, inum: u32) -> Inode {
+    fn get(&self, dev: u32, inum: u32) -> Inode { // todo: use Result
         let mut guard = self.lock();
 
         // Is the inode already in the table?
