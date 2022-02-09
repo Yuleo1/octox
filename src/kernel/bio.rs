@@ -248,6 +248,17 @@ impl<'a> BufGuard<'a> {
     pub unsafe fn unpin(&self) {
         Arc::increment_strong_count(Arc::as_ptr(self.buf.as_ref().unwrap()))
     }
+
+    pub fn align_to<U>(&self) -> &[U] {
+        let (head, body, _) = unsafe { self.sleeplock.as_ref().unwrap().align_to::<U>() };
+        assert!(head.is_ascii(), "Data was not aligned");
+        body
+    }
+    pub fn align_to_mut<U>(&mut self) -> &mut [U] {
+        let (head, body, _) = unsafe { self.sleeplock.as_mut().unwrap().align_to_mut::<U>() };
+        assert!(head.is_ascii(), "Data was not aligned");
+        body
+    }
 }
 
 impl<'a> Deref for BufGuard<'a> {

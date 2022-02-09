@@ -12,3 +12,11 @@ impl Default for IType {
         IType::None
     }
 }
+
+pub struct Stat {
+    pub dev: u32, // File system's disk device
+    pub ino: u32, // Inode number
+    pub itype: IType, // Type of file
+    pub nlink: u16, // Number of links to file
+    pub size: usize, // Size of file in bytes
+}

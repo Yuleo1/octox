@@ -5,10 +5,13 @@ use zerocopy::AsBytes;
 use crate::bio::BCACHE;
 use crate::log::LOG;
 use crate::param::NINODE;
+use crate::proc::{CPUS, CopyInOut};
 use crate::sleeplock::{SleepLock, SleepLockGuard};
 use crate::spinlock::Mutex;
-use crate::stat::IType;
+use crate::stat::{IType, Stat};
 use crate::lazy::{SyncOnceCell, SyncLazy};
+use crate::vm::{VAddr, UVAddr};
+use alloc::boxed::Box;
 
 // File system implementation. Five layers:
 //   - Blocks: allocator for raw disk blocks.
@@ -85,11 +88,7 @@ pub struct DirEnt {
 impl SuperBlock {
     fn read(dev: u32) -> Self {
         let bp = BCACHE.read(dev, 1);
-        let (head, bp, _) = unsafe {
-            bp.align_to::<SuperBlock>()
-        };
-        assert!(head.is_empty());
-        *bp.get(0).unwrap()
+        *bp.align_to::<SuperBlock>().get(0).unwrap()
     }
 
     // Block containing inode i
@@ -270,9 +269,7 @@ impl IData {
     fn update(&self) {
         let sb = SB.get().unwrap();
         let mut bp = BCACHE.read(self.dev, sb.iblock(self.inum));
-        let (head, dip, _) = unsafe { bp.align_to_mut::<DInode>() };
-        assert!(head.is_empty(), "Data was not aligned");
-        let dip = dip.get_mut(self.inum as usize % IPB).unwrap();
+        let dip = bp.align_to_mut::<DInode>().get_mut(self.inum as usize % IPB).unwrap();
         dip.itype = self.itype;
         dip.major = self.major;
         dip.minor = self.minor;
@@ -295,8 +292,7 @@ impl IData {
         let naddr = self.addrs.get_mut(NDIRECT).unwrap();
         if  *naddr > 0 {
             let bp = BCACHE.read(self.dev, *naddr);
-            let (head, a, _) = unsafe { bp.align_to::<u32>() };
-            assert!(head.is_empty(), "Data was not aligned");
+            let a = bp.align_to::<u32>();
             for &addr in a.iter() { // 0 .. NINDIRECT = BISIZE / u32
                 if addr > 0 {
                     bfree(self.dev, addr);
@@ -320,8 +316,71 @@ impl IData {
     // Retun the disk block address of the nth block in inode ip.
     // If there is no such block, bmap allocates one.
     pub fn bmap(&mut self, bn: u32) -> Result<u32, &'static str> {
+        let mut addr;
+        let mut bn = bn as usize;
+
+        if bn < NDIRECT {
+            addr = self.addrs[bn];
+            if addr == 0 {
+                addr = balloc(self.dev);
+                self.addrs[bn] = addr;
+            }
+            return Ok(addr);
+        }
+        bn -= NDIRECT;
+
+        if bn < NINDIRECT {
+            // Load indirect block, allocating if necessary.
+            addr = self.addrs[NDIRECT];
+            if addr == 0 {
+                addr = balloc(self.dev);
+                self.addrs[NDIRECT] = addr;
+            }
+            let mut bp = BCACHE.read(self.dev, addr);
+            let a = bp.align_to_mut::<u32>();
+            addr = a[bn];
+            if addr == 0 {
+                addr = balloc(self.dev);
+                a[bn] = addr;
+                LOG.write(bp);
+            }
+            return Ok(addr);
+        }
 
         Err("bmap: out of range")
+    }
+
+    // Copy stat information from inode.
+    // Caller must hold sleeplock
+    pub fn stat(&self, st: &mut Stat) {
+        st.dev = self.dev;
+        st.ino = self.inum;
+        st.itype = self.itype;
+        st.nlink = self.nlink;
+        st.size = self.size as usize;
+    }
+
+
+    // Read data from inode.
+    // Caller must hold sleeplock.
+    // dst is UVAddr or KVAddr
+    pub fn read<V: VAddr>(&mut self, mut dst: V, off: u32, mut n: u32) -> Result<usize, &'static str> {
+        let mut tot = 0;
+        if off > self.size {
+            return Ok(0);
+        }
+        if off + n > self.size {
+            n = self.size - off;
+        }
+        while tot < n {
+            let bp = BCACHE.read(self.dev, self.bmap(off / BSIZE as u32)?);
+            let m = core::cmp::min(n - tot, BSIZE as u32 - off % BSIZE as u32) as usize;
+            // if CPUS.my_proc().unwrap().either_copyout(dst, bp.deref().deref()).is_err() {
+            //     return Err("inode read: Failed to copyout");
+            // }
+
+        }
+        todo!()
     }
 }
 
@@ -344,9 +403,7 @@ impl MInode {
         let mut guard = self.data.lock();
         if !guard.valid {
             let bp = BCACHE.read(self.dev, sb.iblock(self.inum));
-            let (head, dinode_slice, _) = unsafe { bp.align_to::<DInode>() };
-            assert!(head.is_empty(), "Data was not aligned");
-            let dip = dinode_slice.get(self.inum as usize % IPB).unwrap();
+            let dip = bp.align_to::<DInode>().get(self.inum as usize % IPB).unwrap();
             guard.itype = dip.itype;
             guard.major = dip.major;
             guard.minor = dip.minor;
@@ -365,9 +422,10 @@ impl MInode {
     }
 }
 
+
 impl Inode {
     fn new(ip: Arc<MInode>) -> Self {
-        Self {
+       Self {
             ip: Some(ip)
         }
     }
@@ -404,9 +462,7 @@ impl ITable {
         let sb = SB.get().unwrap();
         for inum in 1..sb.ninodes {
             let mut bp = BCACHE.read(dev, sb.iblock(inum));
-            let (head, dip, _) = unsafe { bp.align_to_mut::<DInode>() };
-            assert!(head.is_empty(), "Data was not aligned");
-            let dip = dip.get_mut(inum as usize % IPB).unwrap();
+            let dip = bp.align_to_mut::<DInode>().get_mut(inum as usize % IPB).unwrap();
             if dip.itype == IType::None { // a free inode
                 *dip = Default::default();
                 dip.itype = itype;

@@ -74,9 +74,7 @@ impl Log {
     // Read the log header from disk into in-memory log header
     fn read_head(&mut self) {
         let buf = BCACHE.read(self.dev, self.start);
-        let (head, lh , _) = unsafe { buf.align_to::<LogHeader>() };
-        assert!(head.is_empty());
-        let lh = lh.get(0).unwrap();
+        let lh = buf.align_to::<LogHeader>().get(0).unwrap();
         self.lh = *lh;
     }
 
@@ -99,9 +97,7 @@ impl Log {
     // current transaction commits.
     fn write_head(&self) {
         let mut buf = BCACHE.read(self.dev, self.start);
-        let (head, hb, _) = unsafe { buf.align_to_mut::<LogHeader>() };
-        assert!(head.is_empty());
-        let hb = hb.get_mut(0).unwrap();
+        let hb = buf.align_to_mut::<LogHeader>().get_mut(0).unwrap();
         *hb = self.lh;
         buf.write();
     }
