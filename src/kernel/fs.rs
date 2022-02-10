@@ -1,5 +1,4 @@
 use core::ops::Deref;
-
 use alloc::sync::Arc;
 use zerocopy::AsBytes;
 use crate::bio::BCACHE;
@@ -9,9 +8,7 @@ use crate::proc::{CPUS, CopyInOut};
 use crate::sleeplock::{SleepLock, SleepLockGuard};
 use crate::spinlock::Mutex;
 use crate::stat::{IType, Stat};
-use crate::lazy::{SyncOnceCell, SyncLazy};
-use crate::vm::{VAddr, UVAddr};
-use alloc::boxed::Box;
+use crate::{vm::VirtAddr, lazy::{SyncOnceCell, SyncLazy}};
 
 // File system implementation. Five layers:
 //   - Blocks: allocator for raw disk blocks.
@@ -364,24 +361,73 @@ impl IData {
     // Read data from inode.
     // Caller must hold sleeplock.
     // dst is UVAddr or KVAddr
-    pub fn read<V: VAddr>(&mut self, mut dst: V, off: u32, mut n: u32) -> Result<usize, &'static str> {
+    pub fn read(&mut self, mut dst: VirtAddr, off: u32, n: u32) -> Result<usize, &'static str> {
         let mut tot = 0;
-        if off > self.size {
+        let mut n = n as usize;
+        let mut off = off as usize;
+
+        if off > self.size as usize {
             return Ok(0);
         }
-        if off + n > self.size {
-            n = self.size - off;
+        if off + n > self.size as usize {
+            n = self.size as usize - off;
         }
-        while tot < n {
-            let bp = BCACHE.read(self.dev, self.bmap(off / BSIZE as u32)?);
-            let m = core::cmp::min(n - tot, BSIZE as u32 - off % BSIZE as u32) as usize;
-            // if CPUS.my_proc().unwrap().either_copyout(dst, bp.deref().deref()).is_err() {
-            //     return Err("inode read: Failed to copyout");
-            // }
 
+        while tot < n {
+            let bp = BCACHE.read(self.dev, self.bmap((off / BSIZE) as u32)?);
+            let m = core::cmp::min(n - tot, BSIZE - off % BSIZE);
+            if CPUS.my_proc().unwrap().either_copyout(dst, &bp[(off % BSIZE)..m]).is_err() {
+                return Err("inode read: Failed to copyout");
+            }
+            tot += m;
+            off += m;
+            dst += m;
         }
-        todo!()
+        Ok(tot)
     }
+
+    // Write data to inode.
+    // Caller must hold sleeplock.
+    // dst is UVAddr or KVAddr 
+    // Returns the number of bytes successfully written.
+    // If the return value is less then the requested n,
+    // there was an error of some kind.
+    pub fn write(&mut self, mut src: VirtAddr, off: u32, n: u32) -> Result<usize, &'static str> {
+        let mut tot = 0;
+        let n = n as usize;
+        let mut off = off as usize;
+
+        if off > self.size as usize {
+            return Err("inode write: off is more than inode size");
+        }
+        if off + n > MAXFILE * BSIZE {
+            return Err("inode write");
+        }
+
+        while tot < n {
+            let mut bp = BCACHE.read(self.dev, self.bmap((off / BSIZE) as u32)?);
+            let m = core::cmp::min(n - tot, BSIZE - off % BSIZE);
+            if CPUS.my_proc().unwrap().either_copyin(&mut bp[(off % BSIZE)..m], src).is_err() {
+                return Err("inode write: Failed to copyin");
+            }
+            tot += m;
+            off += m;
+            src += m;
+            LOG.write(bp);
+        }
+
+        if off > self.size as usize {
+            self.size = off as u32;
+        }
+
+        // write the inode back to disk even if the size didn't change
+        // because the loop above might have called bmap() and added a new
+        // block to self.addrs[].
+        self.update();
+
+        Ok(tot)
+    }
+
 }
 
 impl MInode {

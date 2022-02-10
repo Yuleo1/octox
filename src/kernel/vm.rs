@@ -32,6 +32,24 @@ pub struct KVAddr(usize);
 #[repr(transparent)]
 pub struct UVAddr(usize);
 
+#[derive(Debug, Copy, Clone)]
+pub enum VirtAddr {
+    User(usize),
+    Kernel(usize),
+}
+
+impl From<UVAddr> for VirtAddr {
+    fn from(uv: UVAddr) -> Self {
+        VirtAddr::User(uv.0)
+    }
+}
+
+impl From<KVAddr> for VirtAddr {
+    fn from(kv: KVAddr) -> Self {
+        VirtAddr::Kernel(kv.0)
+    }
+}
+
 pub trait Addr
 where
     Self: Copy
@@ -131,6 +149,24 @@ impl_addr!(KVAddr);
 impl_addr!(UVAddr);
 impl_vaddr!(KVAddr);
 impl_vaddr!(UVAddr);
+
+impl Add<usize> for VirtAddr {
+    type Output = Self;
+    fn add(self, rhs: usize) -> Self::Output {
+        match self {
+            VirtAddr::Kernel(addr) => VirtAddr::Kernel(addr + rhs),
+            VirtAddr::User(addr) => VirtAddr::User(addr + rhs),
+        }
+    }
+}
+impl AddAssign<usize> for VirtAddr {
+    fn add_assign(&mut self, rhs: usize) {
+        *self = match self {
+            &mut VirtAddr::Kernel(addr) => VirtAddr::Kernel(addr + rhs),
+            &mut VirtAddr::User(addr) => VirtAddr::User(addr + rhs),
+        };
+    }
+}
 
 pub trait PageAllocator: Sized {
     fn try_new_zeroed() -> Option<usize> {
@@ -541,7 +577,7 @@ impl Uvm {
     // Copy from kernel to user.
     // Copy bytes from src to virtual address dstva in a given page table.
     // Return Result<(), ()>
-    pub fn copyout<T: AsBytes>(&mut self, mut dstva: UVAddr, src: &T) -> Result<(), ()> {
+    pub fn copyout<T: AsBytes + ?Sized>(&mut self, mut dstva: UVAddr, src: &T) -> Result<(), ()> {
         let src = src.as_bytes();
         let mut len = src.len();
         let mut offset = 0;
@@ -564,7 +600,7 @@ impl Uvm {
     // Copy from user to kernel.
     // Copy len bytes to dst from virtual address srcva in a given page table.
     // Return Result<(), ()>
-    pub fn copyin<T: AsBytes + FromBytes>(
+    pub fn copyin<T: AsBytes + FromBytes + ?Sized>(
         &mut self,
         dst: &mut T,
         mut srcva: UVAddr,

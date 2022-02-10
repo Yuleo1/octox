@@ -4,7 +4,7 @@ use crate::memlayout::{kstack, TRAMPOLINE, TRAPFLAME};
 use crate::spinlock::{Mutex, MutexGuard};
 use crate::swtch::swtch;
 use crate::trap::usertrap_ret;
-use crate::vm::{Addr, KVAddr, Page, PageAllocator, PteFlags, UVAddr, Uvm, VAddr, KVM};
+use crate::vm::{Page, PageAllocator, PteFlags, UVAddr, Uvm, KVM, VirtAddr};
 use crate::{param::*, riscv::*, trampoline::trampoline};
 use crate::{print, println};
 use alloc::string::String;
@@ -142,13 +142,13 @@ pub trait Process {
     fn yielding(&self);
 }
 
-pub trait CopyInOut<V: VAddr> {
+pub trait CopyInOut {
     // Copy to either a user address, or kernel address.
     // Return Result <(), ()
-    fn either_copyout<T: AsBytes>(&self, dst: V, src: &T) -> Result<(), ()>;
+    fn either_copyout<T: AsBytes + ?Sized>(&self, dst: VirtAddr, src: &T) -> Result<(), ()>;
     // Copy from either a user address, or kernel address,
     // Return Result<(), ()>
-    fn either_copyin<T: AsBytes + FromBytes>(&self, dst: &mut T, src: V) -> Result<(), ()>;
+    fn either_copyin<T: AsBytes + FromBytes + ?Sized>(&self, dst: &mut T, src: VirtAddr) -> Result<(), ()>;
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -731,6 +731,39 @@ impl Process for Arc<Proc> {
     }
 }
 
+impl CopyInOut for Arc<Proc> {
+   fn either_copyout<T: AsBytes + ?Sized>(&self, dst: VirtAddr, src: &T) -> Result<(), ()> {
+       match dst {
+           VirtAddr::User(addr) => {
+               let uvm = unsafe { (&mut *self.data.get()).uvm.as_mut().unwrap() };
+               uvm.copyout(addr.into(), src)
+           },
+           VirtAddr::Kernel(addr) => {
+               let src = src.as_bytes();
+               let len = src.len();
+               let dst = unsafe { core::slice::from_raw_parts_mut(addr as *mut u8, len) };
+               dst.copy_from_slice(src);
+               Ok(())
+           }
+       }
+   } 
+   fn either_copyin<T: AsBytes + FromBytes + ?Sized>(&self, dst: &mut T, src: VirtAddr) -> Result<(), ()> {
+       match src {
+           VirtAddr::User(addr) => {
+            let uvm = unsafe { (&mut *self.data.get()).uvm.as_mut().unwrap() };
+            uvm.copyin(dst, addr.into())
+           },
+           VirtAddr::Kernel(addr) => {
+               let dst = dst.as_bytes_mut();
+               let len = dst.len();
+               let src = unsafe { core::slice::from_raw_parts(addr as *const u8, len) };
+               dst.copy_from_slice(src);
+               Ok(())
+           }
+       }
+   }
+}
+/*
 impl CopyInOut<UVAddr> for Arc<Proc> {
     fn either_copyout<T: AsBytes>(&self, dst: UVAddr, src: &T) -> Result<(), ()> {
         let uvm = unsafe { (&mut *self.data.get()).uvm.as_mut().unwrap() };
@@ -757,7 +790,7 @@ impl CopyInOut<KVAddr> for Arc<Proc> {
         dst.copy_from_slice(src);
         Ok(())
     }
-}
+}*/
 
 // Set up first user process.
 pub fn user_init() {
