@@ -1,14 +1,17 @@
-use core::ops::Deref;
-use alloc::sync::Arc;
-use zerocopy::AsBytes;
 use crate::bio::BCACHE;
 use crate::log::LOG;
 use crate::param::NINODE;
-use crate::proc::{CPUS, CopyInOut};
+use crate::proc::{CopyInOut, CPUS};
 use crate::sleeplock::{SleepLock, SleepLockGuard};
 use crate::spinlock::Mutex;
 use crate::stat::{IType, Stat};
-use crate::{vm::VirtAddr, lazy::{SyncOnceCell, SyncLazy}};
+use crate::{
+    lazy::{SyncLazy, SyncOnceCell},
+    vm::VirtAddr,
+};
+use alloc::sync::Arc;
+use core::ops::Deref;
+use zerocopy::AsBytes;
 
 // File system implementation. Five layers:
 //   - Blocks: allocator for raw disk blocks.
@@ -107,7 +110,6 @@ pub fn init(dev: u32) {
     LOG.init();
 }
 
-
 // Zero a block
 fn bzero(dev: u32, bno: u32) {
     let mut bp = BCACHE.read(dev, bno);
@@ -127,7 +129,8 @@ fn balloc(dev: u32) -> u32 {
         while bi < BPB && b + bi < sb.size {
             bi += 1;
             let m = 1 << (bi % 8);
-            if bp.get((bi / 8) as usize).unwrap() & m == 0 { // Is block free?
+            if bp.get((bi / 8) as usize).unwrap() & m == 0 {
+                // Is block free?
                 *bp.get_mut((bi / 8) as usize).unwrap() |= m; // Mark block in use.
                 LOG.write(bp);
                 bzero(dev, b + bi);
@@ -149,8 +152,7 @@ fn bfree(dev: u32, b: u32) {
     }
     *bp.get_mut((bi / 8) as usize).unwrap() &= !m;
     LOG.write(bp);
-} 
-
+}
 
 // Inodes.
 //
@@ -178,12 +180,12 @@ fn bfree(dev: u32, b: u32) {
 //   the reference and link counts have fallen to zero.
 //
 // * Referencing in table: an entry in the inode table
-//   is free if Arc::strong_count(&Arc<MInode>) is zero. Otherwise 
+//   is free if Arc::strong_count(&Arc<MInode>) is zero. Otherwise
 //   Arc count tracks the number of in-memory pointers to
-//   the entry (open files and current directories). 
-//   get() finds or creates a table entry and increments 
+//   the entry (open files and current directories).
+//   get() finds or creates a table entry and increments
 //   its Arc count; iput() comsume Arc<inode>.
-// 
+//
 // * Valid: the information (type, size, &c) in an inode
 //   table entry is only correct when ip.valid is 1.
 //   ilock() reads the inode from
@@ -218,16 +220,15 @@ fn bfree(dev: u32, b: u32) {
 // holds, one must hold itable lock while using any of those fields.
 //
 // An ip.lock sleeplock protects all ip fields other than ref,
-// dev, and inum. One must hold ip.lock in order to 
+// dev, and inum. One must hold ip.lock in order to
 // read or write that inode's ip.valid, ip.size, ip.type, &c.
-
 
 pub static ITABLE: SyncLazy<Mutex<[Option<Arc<MInode>>; NINODE]>> = SyncLazy::new(|| todo!());
 
 // Inode passed from ITABLE.
 // Wrapper for in-memory inode i.e. MInode
 pub struct Inode {
-    ip: Option<Arc<MInode>>
+    ip: Option<Arc<MInode>>,
 }
 
 // in-memory copy of an inode
@@ -250,7 +251,6 @@ pub struct IData {
     addrs: [u32; NDIRECT + 1],
 }
 
-
 impl IData {
     fn new(dev: u32, inum: u32) -> Self {
         Self {
@@ -266,7 +266,10 @@ impl IData {
     fn update(&self) {
         let sb = SB.get().unwrap();
         let mut bp = BCACHE.read(self.dev, sb.iblock(self.inum));
-        let dip = bp.align_to_mut::<DInode>().get_mut(self.inum as usize % IPB).unwrap();
+        let dip = bp
+            .align_to_mut::<DInode>()
+            .get_mut(self.inum as usize % IPB)
+            .unwrap();
         dip.itype = self.itype;
         dip.major = self.major;
         dip.minor = self.minor;
@@ -285,12 +288,13 @@ impl IData {
                 *addr = 0;
             }
         }
-        
+
         let naddr = self.addrs.get_mut(NDIRECT).unwrap();
-        if  *naddr > 0 {
+        if *naddr > 0 {
             let bp = BCACHE.read(self.dev, *naddr);
             let a = bp.align_to::<u32>();
-            for &addr in a.iter() { // 0 .. NINDIRECT = BISIZE / u32
+            for &addr in a.iter() {
+                // 0 .. NINDIRECT = BISIZE / u32
                 if addr > 0 {
                     bfree(self.dev, addr);
                 }
@@ -309,7 +313,7 @@ impl IData {
     // in blocks on the disk. The first NDIRECT block numbers
     // are listed in idata.addrs[]. The next NINDIRECT blocks
     // are listed in block idata.addrs[NDIRECT].
-    // 
+    //
     // Retun the disk block address of the nth block in inode ip.
     // If there is no such block, bmap allocates one.
     pub fn bmap(&mut self, bn: u32) -> Result<u32, &'static str> {
@@ -357,17 +361,20 @@ impl IData {
         st.size = self.size as usize;
     }
 
-
     // Read data from inode.
     // Caller must hold sleeplock.
     // dst is UVAddr or KVAddr
-    pub fn read(&mut self, mut dst: VirtAddr, off: u32, n: u32) -> Result<usize, &'static str> {
+    pub fn read(
+        &mut self,
+        mut dst: VirtAddr,
+        off: u32,
+        mut n: usize,
+    ) -> Result<usize, &'static str> {
         let mut tot = 0;
-        let mut n = n as usize;
         let mut off = off as usize;
 
         if off > self.size as usize {
-            return Ok(0);
+            return Err("start point beyond the end of the file");
         }
         if off + n > self.size as usize {
             n = self.size as usize - off;
@@ -376,7 +383,12 @@ impl IData {
         while tot < n {
             let bp = BCACHE.read(self.dev, self.bmap((off / BSIZE) as u32)?);
             let m = core::cmp::min(n - tot, BSIZE - off % BSIZE);
-            if CPUS.my_proc().unwrap().either_copyout(dst, &bp[(off % BSIZE)..m]).is_err() {
+            if CPUS
+                .my_proc()
+                .unwrap()
+                .either_copyout(dst, &bp[(off % BSIZE)..m])
+                .is_err()
+            {
                 return Err("inode read: Failed to copyout");
             }
             tot += m;
@@ -388,13 +400,12 @@ impl IData {
 
     // Write data to inode.
     // Caller must hold sleeplock.
-    // dst is UVAddr or KVAddr 
+    // dst is UVAddr or KVAddr
     // Returns the number of bytes successfully written.
     // If the return value is less then the requested n,
     // there was an error of some kind.
-    pub fn write(&mut self, mut src: VirtAddr, off: u32, n: u32) -> Result<usize, &'static str> {
+    pub fn write(&mut self, mut src: VirtAddr, off: u32, n: usize) -> Result<usize, &'static str> {
         let mut tot = 0;
-        let n = n as usize;
         let mut off = off as usize;
 
         if off > self.size as usize {
@@ -407,7 +418,12 @@ impl IData {
         while tot < n {
             let mut bp = BCACHE.read(self.dev, self.bmap((off / BSIZE) as u32)?);
             let m = core::cmp::min(n - tot, BSIZE - off % BSIZE);
-            if CPUS.my_proc().unwrap().either_copyin(&mut bp[(off % BSIZE)..m], src).is_err() {
+            if CPUS
+                .my_proc()
+                .unwrap()
+                .either_copyin(&mut bp[(off % BSIZE)..m], src)
+                .is_err()
+            {
                 return Err("inode write: Failed to copyin");
             }
             tot += m;
@@ -428,6 +444,76 @@ impl IData {
         Ok(tot)
     }
 
+    // Directories
+
+    // Look for a directory entry in a directory.
+    // If found, set *poff to byte offset of entry.
+    pub fn dirlookup(&mut self, name: &[u8], poff: Option<&mut usize>) -> Option<Inode> {
+        use core::mem::size_of;
+
+        let mut de: DirEnt = Default::default();
+        if self.itype != IType::Dir {
+            panic!("dirlookup not DIR");
+        }
+
+        for off in (0..self.size).step_by(size_of::<DirEnt>()) {
+            self.read(
+                VirtAddr::Kernel(&mut de as *mut _ as usize),
+                off,
+                size_of::<DirEnt>(),
+            )
+            .expect("dirlookup read");
+            if de.inum == 0 {
+                continue;
+            }
+            if name.eq(&de.name) {
+                // entry matches path element
+                if let Some(poff) = poff {
+                    *poff = off as usize;
+                }
+                return Some(ITABLE.get(self.dev, de.inum as u32));
+            }
+        }
+        None
+    }
+
+    // Write a new directory entry (name, inum) into the directory dp.
+    pub fn dirlink(&mut self, name: &[u8], inum: u32) -> Result<(), &'static str> {
+        use core::mem::size_of;
+
+        let mut de: DirEnt = Default::default();
+
+        // check that name is not present.
+        if self.dirlookup(name, None).is_some() {
+            return Err("dirlink: the name already exists");
+        }
+
+        // Look for an empty dirent
+        let mut offset = 0;
+        for off in (0..self.size).step_by(size_of::<DirEnt>()) {
+            self.read(
+                VirtAddr::Kernel(&mut de as *mut _ as usize),
+                off,
+                size_of::<DirEnt>(),
+            )
+            .unwrap();
+            offset += size_of::<DirEnt>() as u32;
+            if de.inum == 0 {
+                break;
+            }
+        }
+
+        de.name.copy_from_slice(&name[0..DIRSIZ]);
+        de.inum = inum as u16;
+        self.write(
+            VirtAddr::Kernel(&mut de as *mut _ as usize),
+            offset,
+            size_of::<DirEnt>(),
+        )
+        .unwrap();
+
+        Ok(())
+    }
 }
 
 impl MInode {
@@ -444,12 +530,15 @@ impl MInode {
 
     // Lock the inode
     // Reads the inode from disk if necessary.
-    fn lock(&self) -> SleepLockGuard<IData> {
+    pub fn lock(&self) -> SleepLockGuard<IData> {
         let sb = SB.get().unwrap();
         let mut guard = self.data.lock();
         if !guard.valid {
             let bp = BCACHE.read(self.dev, sb.iblock(self.inum));
-            let dip = bp.align_to::<DInode>().get(self.inum as usize % IPB).unwrap();
+            let dip = bp
+                .align_to::<DInode>()
+                .get(self.inum as usize % IPB)
+                .unwrap();
             guard.itype = dip.itype;
             guard.major = dip.major;
             guard.minor = dip.minor;
@@ -468,18 +557,15 @@ impl MInode {
     }
 }
 
-
 impl Inode {
     fn new(ip: Arc<MInode>) -> Self {
-       Self {
-            ip: Some(ip)
-        }
+        Self { ip: Some(ip) }
     }
     // Increments reference count fot Inode.
     // Return cloned Inode to enable ip = ip1.dup() idiom.
     pub fn dup(&self) -> Self {
         Self {
-            ip: Some(Arc::clone(self.ip.as_ref().unwrap()))
+            ip: Some(Arc::clone(self.ip.as_ref().unwrap())),
         }
     }
 }
@@ -500,16 +586,20 @@ impl Deref for Inode {
 type ITable = Mutex<[Option<Arc<MInode>>; NINODE]>;
 
 impl ITable {
-
     // Allocate an inode on device dev.
     // Mark it as allocated by giving it type.
     // Returns an unlocked but allocated and referenced inode.
-    pub fn alloc(&self, dev: u32, itype: IType) -> Inode { // todo: use Result 
+    pub fn alloc(&self, dev: u32, itype: IType) -> Inode {
+        // todo: use Result
         let sb = SB.get().unwrap();
         for inum in 1..sb.ninodes {
             let mut bp = BCACHE.read(dev, sb.iblock(inum));
-            let dip = bp.align_to_mut::<DInode>().get_mut(inum as usize % IPB).unwrap();
-            if dip.itype == IType::None { // a free inode
+            let dip = bp
+                .align_to_mut::<DInode>()
+                .get_mut(inum as usize % IPB)
+                .unwrap();
+            if dip.itype == IType::None {
+                // a free inode
                 *dip = Default::default();
                 dip.itype = itype;
                 LOG.write(bp);
@@ -522,7 +612,8 @@ impl ITable {
     // Find the inode with number inum on device dev
     // and return the in-memoroy copy. Does not lock
     // the inode and does not read it from disk.
-    fn get(&self, dev: u32, inum: u32) -> Inode { // todo: use Result
+    fn get(&self, dev: u32, inum: u32) -> Inode {
+        // todo: use Result
         let mut guard = self.lock();
 
         // Is the inode already in the table?
@@ -531,14 +622,14 @@ impl ITable {
             match ip {
                 Some(ip) if ip.dev == dev && ip.inum == inum => {
                     return Inode::new(Arc::clone(ip));
-                },
+                }
                 None if empty.is_none() => {
                     empty = ip;
                 }
                 _ => (),
             }
         }
-        
+
         // Recycle an inode entry
         if empty.is_none() {
             panic!("iget: no inodes");
@@ -578,11 +669,10 @@ impl ITable {
                 match mip {
                     Some(ip) if Arc::ptr_eq(&inode, ip) => {
                         mip.take();
-                    },
+                    }
                     _ => (),
                 }
             }
         }
     }
-
 }
