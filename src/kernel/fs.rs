@@ -1,10 +1,16 @@
+#[cfg(target_os = "none")]
 use crate::bio::BCACHE;
+#[cfg(target_os = "none")]
 use crate::log::LOG;
 use crate::param::NINODE;
+#[cfg(target_os = "none")]
 use crate::proc::{CopyInOut, CPUS};
+#[cfg(target_os = "none")]
 use crate::sleeplock::{SleepLock, SleepLockGuard};
+#[cfg(target_os = "none")]
 use crate::spinlock::Mutex;
 use crate::stat::{IType, Stat};
+#[cfg(target_os = "none")]
 use crate::{
     lazy::{SyncLazy, SyncOnceCell},
     vm::VirtAddr,
@@ -86,6 +92,7 @@ pub struct DirEnt {
 }
 
 impl SuperBlock {
+    #[cfg(target_os = "none")]
     fn read(dev: u32) -> Self {
         let bp = BCACHE.read(dev, 1);
         *bp.align_to::<SuperBlock>().get(0).unwrap()
@@ -103,6 +110,7 @@ impl SuperBlock {
 }
 
 // Init fs
+#[cfg(target_os = "none")]
 pub fn init(dev: u32) {
     SB.set(SuperBlock::read(dev)).unwrap();
     let sb = SB.get().unwrap();
@@ -111,6 +119,7 @@ pub fn init(dev: u32) {
 }
 
 // Zero a block
+#[cfg(target_os = "none")]
 fn bzero(dev: u32, bno: u32) {
     let mut bp = BCACHE.read(dev, bno);
     bp.copy_from_slice(&[0; BSIZE]);
@@ -120,6 +129,7 @@ fn bzero(dev: u32, bno: u32) {
 // Blocks.
 
 // Allocate a zeroed disk block.
+#[cfg(target_os = "none")]
 fn balloc(dev: u32) -> u32 {
     let sb = SB.get().unwrap();
     let mut bp;
@@ -142,6 +152,7 @@ fn balloc(dev: u32) -> u32 {
 }
 
 // Free a disk block
+#[cfg(target_os = "none")]
 fn bfree(dev: u32, b: u32) {
     let sb = SB.get().unwrap();
     let mut bp = BCACHE.read(dev, sb.bblock(b));
@@ -223,21 +234,26 @@ fn bfree(dev: u32, b: u32) {
 // dev, and inum. One must hold ip.lock in order to
 // read or write that inode's ip.valid, ip.size, ip.type, &c.
 
+#[cfg(target_os = "none")]
 pub static ITABLE: SyncLazy<Mutex<[Option<Arc<MInode>>; NINODE]>> = SyncLazy::new(|| todo!());
 
 // Inode passed from ITABLE.
 // Wrapper for in-memory inode i.e. MInode
+#[cfg(target_os = "none")]
+#[derive(Default)]
 pub struct Inode {
     ip: Option<Arc<MInode>>,
 }
 
 // in-memory copy of an inode
+#[cfg(target_os = "none")]
 pub struct MInode {
     dev: u32,
     inum: u32,
     data: SleepLock<IData>,
 }
 
+#[cfg(target_os = "none")]
 #[derive(Debug, Default)]
 pub struct IData {
     dev: u32,
@@ -251,6 +267,7 @@ pub struct IData {
     addrs: [u32; NDIRECT + 1],
 }
 
+#[cfg(target_os = "none")]
 impl IData {
     fn new(dev: u32, inum: u32) -> Self {
         Self {
@@ -516,6 +533,7 @@ impl IData {
     }
 }
 
+#[cfg(target_os = "none")]
 impl MInode {
     fn new(dev: u32, inum: u32) -> Self {
         Self {
@@ -557,6 +575,7 @@ impl MInode {
     }
 }
 
+#[cfg(target_os = "none")]
 impl Inode {
     fn new(ip: Arc<MInode>) -> Self {
         Self { ip: Some(ip) }
@@ -570,12 +589,14 @@ impl Inode {
     }
 }
 
+#[cfg(target_os = "none")]
 impl Drop for Inode {
     fn drop(&mut self) {
         ITABLE.put(self.ip.take().unwrap());
     }
 }
 
+#[cfg(target_os = "none")]
 impl Deref for Inode {
     type Target = MInode;
     fn deref(&self) -> &Self::Target {
@@ -583,8 +604,10 @@ impl Deref for Inode {
     }
 }
 
+#[cfg(target_os = "none")]
 type ITable = Mutex<[Option<Arc<MInode>>; NINODE]>;
 
+#[cfg(target_os = "none")]
 impl ITable {
     // Allocate an inode on device dev.
     // Mark it as allocated by giving it type.
@@ -675,4 +698,33 @@ impl ITable {
             }
         }
     }
+}
+
+// Paths
+
+// Copy the next path element from path into name.
+// Return a pointer to the element following the copied one.
+// The returned path has no leading slashes,
+// so the caller can check *path=='\0' to see if the name is the last one.
+// if no name to remove, return None.
+//
+// Examples:
+//   skipelem("a/bb/c", name) = "bb/c", setting name = "a"
+//   skipelem("///a//bb", name) = "bb", setting name = "a"
+//   skipelem("a", name) = "", setting name = "a"
+//   skipelem("", name) = skipelem("////", name) = 0
+//
+#[cfg(target_os = "none")]
+fn skipelem(path: &[u8], name: &mut [u8]) -> Option<usize> {
+    let mut i = 0;
+
+    while let Some(b'/') = path.get(i) {
+        i += 1;
+    }
+
+    if let Some(0) = path.get(i) {
+        return None;
+    }
+
+    None
 }
