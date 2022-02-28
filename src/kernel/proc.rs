@@ -4,7 +4,7 @@ use crate::memlayout::{kstack, TRAMPOLINE, TRAPFLAME};
 use crate::spinlock::{Mutex, MutexGuard};
 use crate::swtch::swtch;
 use crate::trap::usertrap_ret;
-use crate::vm::{Page, PageAllocator, PteFlags, UVAddr, Uvm, KVM, VirtAddr};
+use crate::vm::{Page, PageAllocator, PteFlags, UVAddr, Uvm, VirtAddr, KVM};
 use crate::{param::*, riscv::*, trampoline::trampoline};
 use crate::{print, println};
 use alloc::string::String;
@@ -148,7 +148,11 @@ pub trait CopyInOut {
     fn either_copyout<T: AsBytes + ?Sized>(&self, dst: VirtAddr, src: &T) -> Result<(), ()>;
     // Copy from either a user address, or kernel address,
     // Return Result<(), ()>
-    fn either_copyin<T: AsBytes + FromBytes + ?Sized>(&self, dst: &mut T, src: VirtAddr) -> Result<(), ()>;
+    fn either_copyin<T: AsBytes + FromBytes + ?Sized>(
+        &self,
+        dst: &mut T,
+        src: VirtAddr,
+    ) -> Result<(), ()>;
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -350,7 +354,11 @@ impl<'a> Drop for IntrLock<'a> {
 impl Procs {
     pub fn new() -> Self {
         Self {
-            pool: core::iter::repeat_with(|| Arc::new(Proc::new())).take(NPROC).collect::<Vec<_>>().try_into().unwrap(),
+            pool: core::iter::repeat_with(|| Arc::new(Proc::new()))
+                .take(NPROC)
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
             wait_lock: Mutex::new((), "wait lock"),
         }
     }
@@ -732,36 +740,40 @@ impl Process for Arc<Proc> {
 }
 
 impl CopyInOut for Arc<Proc> {
-   fn either_copyout<T: AsBytes + ?Sized>(&self, dst: VirtAddr, src: &T) -> Result<(), ()> {
-       match dst {
-           VirtAddr::User(addr) => {
-               let uvm = unsafe { (&mut *self.data.get()).uvm.as_mut().unwrap() };
-               uvm.copyout(addr.into(), src)
-           },
-           VirtAddr::Kernel(addr) => {
-               let src = src.as_bytes();
-               let len = src.len();
-               let dst = unsafe { core::slice::from_raw_parts_mut(addr as *mut u8, len) };
-               dst.copy_from_slice(src);
-               Ok(())
-           }
-       }
-   } 
-   fn either_copyin<T: AsBytes + FromBytes + ?Sized>(&self, dst: &mut T, src: VirtAddr) -> Result<(), ()> {
-       match src {
-           VirtAddr::User(addr) => {
-            let uvm = unsafe { (&mut *self.data.get()).uvm.as_mut().unwrap() };
-            uvm.copyin(dst, addr.into())
-           },
-           VirtAddr::Kernel(addr) => {
-               let dst = dst.as_bytes_mut();
-               let len = dst.len();
-               let src = unsafe { core::slice::from_raw_parts(addr as *const u8, len) };
-               dst.copy_from_slice(src);
-               Ok(())
-           }
-       }
-   }
+    fn either_copyout<T: AsBytes + ?Sized>(&self, dst: VirtAddr, src: &T) -> Result<(), ()> {
+        match dst {
+            VirtAddr::User(addr) => {
+                let uvm = unsafe { (&mut *self.data.get()).uvm.as_mut().unwrap() };
+                uvm.copyout(addr.into(), src)
+            }
+            VirtAddr::Kernel(addr) => {
+                let src = src.as_bytes();
+                let len = src.len();
+                let dst = unsafe { core::slice::from_raw_parts_mut(addr as *mut u8, len) };
+                dst.copy_from_slice(src);
+                Ok(())
+            }
+        }
+    }
+    fn either_copyin<T: AsBytes + FromBytes + ?Sized>(
+        &self,
+        dst: &mut T,
+        src: VirtAddr,
+    ) -> Result<(), ()> {
+        match src {
+            VirtAddr::User(addr) => {
+                let uvm = unsafe { (&mut *self.data.get()).uvm.as_mut().unwrap() };
+                uvm.copyin(dst, addr.into())
+            }
+            VirtAddr::Kernel(addr) => {
+                let dst = dst.as_bytes_mut();
+                let len = dst.len();
+                let src = unsafe { core::slice::from_raw_parts(addr as *const u8, len) };
+                dst.copy_from_slice(src);
+                Ok(())
+            }
+        }
+    }
 }
 /*
 impl CopyInOut<UVAddr> for Arc<Proc> {

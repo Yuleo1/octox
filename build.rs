@@ -27,11 +27,15 @@ fn main() {
     // let uprogs = todo
 
     // Build fs.img
-    let mut mkfs_cmd = Command::new(target_dir.join("mkfs").join(mkfs_target_triple).join("release").join("mkfs"));
+    let mut mkfs_cmd = Command::new(
+        target_dir
+            .join("mkfs")
+            .join(mkfs_target_triple)
+            .join("release")
+            .join("mkfs"),
+    );
     mkfs_cmd.current_dir(target_dir);
-    mkfs_cmd
-    .arg("fs.img")
-    .arg("../README.md");
+    mkfs_cmd.arg("fs.img").arg("../README.md");
     // .args(uprogs);
     mkfs_cmd.status().expect("mkfs failed!");
 

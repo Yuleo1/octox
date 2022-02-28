@@ -1,10 +1,12 @@
-use core::ops::{Deref, DerefMut};
 use crate::{
+    bio::{BufGuard, BCACHE},
+    fs::{BSIZE, SB},
     lazy::SyncLazy,
-    param::{LOGSIZE, ROOTDEV, MAXOPBLOCKS},
+    param::{LOGSIZE, MAXOPBLOCKS, ROOTDEV},
+    proc::{Process, CPUS, PROCS},
     spinlock::Mutex,
-    fs::{SB, BSIZE}, bio::{BCACHE, BufGuard}, proc::{CPUS, Process, PROCS},
 };
+use core::ops::{Deref, DerefMut};
 
 // Simple logging that allows concurrent FS system calls.
 //
@@ -52,13 +54,16 @@ pub struct Log {
 impl Log {
     fn new(dev: u32) -> Self {
         let sb = SB.get().unwrap();
-        let mut log =  Self {
+        let mut log = Self {
             start: sb.logstart,
             size: sb.nlog,
             dev,
             outstanding: 0,
             committing: false,
-            lh: LogHeader { n: 0, block: [0; LOGSIZE] },
+            lh: LogHeader {
+                n: 0,
+                block: [0; LOGSIZE],
+            },
         };
         log.recover();
         log
@@ -69,7 +74,7 @@ impl Log {
         self.install_trans(true); // if committed, copy from log to disk
         self.lh.n = 0;
         self.write_head(); // clear the log
-    } 
+    }
 
     // Read the log header from disk into in-memory log header
     fn read_head(&mut self) {
@@ -78,7 +83,6 @@ impl Log {
         self.lh = *lh;
     }
 
-    
     // Copy comitted blocks from log to their home location
     fn install_trans(&self, recovering: bool) {
         for tail in 0..self.lh.n {
@@ -126,7 +130,10 @@ impl Log {
 impl Mutex<Log> {
     pub fn init(&self) {
         // SyncLazy initialization
-        assert!(core::mem::size_of::<LogHeader>() >= BSIZE, "initlog: too big log header");
+        assert!(
+            core::mem::size_of::<LogHeader>() >= BSIZE,
+            "initlog: too big log header"
+        );
     }
     // called at the start of each FS system call.
     pub fn begin_op(&self) {
@@ -135,7 +142,9 @@ impl Mutex<Log> {
         loop {
             if guard.committing {
                 guard = p.sleep(guard.deref() as *const _ as usize, guard);
-            } else if (guard.lh.n as usize + (guard.outstanding + 1) as usize * MAXOPBLOCKS) > LOGSIZE {
+            } else if (guard.lh.n as usize + (guard.outstanding + 1) as usize * MAXOPBLOCKS)
+                > LOGSIZE
+            {
                 // this op might exhaust log space; wait for commit.
                 guard = p.sleep(guard.deref() as *const _ as usize, guard);
             } else {
@@ -182,7 +191,7 @@ impl Mutex<Log> {
     // Caller has modified b->data and is done with the buffer.
     // Record the block number and pin in the cache by increasing refcnt.
     // commit()/write() will do the disk write.
-    // 
+    //
     // LOG.write() replaces BudGuard.write(); a typical use is:
     // bp = BCACHE.read();
     // modify bp.data[]
@@ -198,7 +207,8 @@ impl Mutex<Log> {
 
         let blockno = b.buf().ctrl.read().blockno;
         for i in 0..guard.lh.n {
-            if guard.lh.block[i as usize] == blockno { // log absorption
+            if guard.lh.block[i as usize] == blockno {
+                // log absorption
                 return;
             }
         }

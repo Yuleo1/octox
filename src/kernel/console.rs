@@ -94,7 +94,9 @@ impl Device<UVAddr, u8> for Mutex<Cons> {
         let mut c = 0;
         for (n, csrc) in src.iter().enumerate() {
             let p = CPUS.my_proc().unwrap();
-            if p.either_copyin(&mut c, From::from(Self::to_va(csrc))).is_err() {
+            if p.either_copyin(&mut c, From::from(Self::to_va(csrc)))
+                .is_err()
+            {
                 return Some(n);
             }
             putc(c);
