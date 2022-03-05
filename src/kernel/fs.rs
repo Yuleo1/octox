@@ -703,7 +703,7 @@ impl ITable {
 // Paths
 
 // Copy the next path element from path into name.
-// Return a pointer to the element following the copied one.
+// Return a slice to the element following the copied one.
 // The returned path has no leading slashes,
 // so the caller can check *path=='\0' to see if the name is the last one.
 // if no name to remove, return None.
@@ -715,7 +715,7 @@ impl ITable {
 //   skipelem("", name) = skipelem("////", name) = 0
 //
 #[cfg(target_os = "none")]
-fn skipelem(path: &[u8], name: &mut [u8]) -> Option<usize> {
+fn skipelem<'a, 'b>(path: &'a [u8], name: &'b mut [u8]) -> Option<&'a [u8]> {
     let mut i = 0;
 
     while let Some(b'/') = path.get(i) {
@@ -726,5 +726,25 @@ fn skipelem(path: &[u8], name: &mut [u8]) -> Option<usize> {
         return None;
     }
 
-    None
+    let s = i;
+    while let Some(c) = path.get(i) {
+        match c {
+            b'/' | 0 => break,
+            _ => i += 1,
+        }
+    }
+
+    let len = i - s;
+    if len >= DIRSIZ {
+        name[..DIRSIZ].copy_from_slice(&path[s..DIRSIZ]);
+    } else {
+        name[..len].copy_from_slice(&path[s..len]);
+        name[len..].fill(0);
+    }
+
+    while let Some(b'/') = path.get(i) {
+        i += 1;
+    }
+
+    Some(&path[i..])
 }
