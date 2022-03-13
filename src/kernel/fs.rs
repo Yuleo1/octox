@@ -2,7 +2,7 @@
 use crate::bio::BCACHE;
 #[cfg(target_os = "none")]
 use crate::log::LOG;
-use crate::param::NINODE;
+use crate::param::{NINODE, ROOTDEV};
 #[cfg(target_os = "none")]
 use crate::proc::{CopyInOut, CPUS};
 #[cfg(target_os = "none")]
@@ -584,7 +584,8 @@ impl Inode {
     // Return cloned Inode to enable ip = ip1.dup() idiom.
     pub fn dup(&self) -> Self {
         Self {
-            ip: Some(Arc::clone(self.ip.as_ref().unwrap())),
+            //ip: Some(Arc::clone(self.ip.as_ref().unwrap())),
+            ip: self.ip.clone(),
         }
     }
 }
@@ -600,6 +601,7 @@ impl Drop for Inode {
 impl Deref for Inode {
     type Target = MInode;
     fn deref(&self) -> &Self::Target {
+        // ref count >2 ?
         self.ip.as_ref().unwrap()
     }
 }
@@ -747,4 +749,54 @@ fn skipelem<'a, 'b>(path: &'a [u8], name: &'b mut [u8]) -> Option<&'a [u8]> {
     }
 
     Some(&path[i..])
+}
+
+// Look up and return the inode for a path name.
+// If parent != None, return the inode for the parent and copy the final
+// path element into name, which must have room for DIRSIZ bytes.
+// Must be called inside a transaction since it calls iput().
+pub fn namex(path: &[u8], nameiparent: bool, name: &mut [u8]) -> Inode {
+    let mut ip;
+    if let Some(&b'/') = path.first() {
+        ip = ITABLE.get(ROOTDEV, ROOTINO);
+    } else {
+        ip = unsafe { &(*CPUS.my_proc().unwrap().data.get()) }.cwd.dup();
+    }
+    loop {
+        match skipelem(path, name) {
+            Some(path) if path.first() != Some(&0) => {
+                let mut guard = ip.lock();
+                if guard.itype != IType::Dir {
+                    // drop
+                    return Inode { ip : None };
+                }
+                if nameiparent && path[0] == b'\0' {
+                    // Stop one level early.
+                    SleepLock::unlock(guard);
+                    return ip;
+                }
+                if let Some(next) = guard.dirlookup(name, Some(&mut 0)) {
+                    SleepLock::unlock(guard);
+                    ip = next;
+                } else {
+                    // drop
+                    return Inode { ip: None };
+                }
+            },
+            _ => break,
+        }
+    }
+    if nameiparent {
+        return Inode { ip: None };
+    }
+    ip
+}
+
+pub fn namei(path: &[u8]) -> Inode {
+    let mut name = [0u8; DIRSIZ];
+    namex(path, false, &mut name)
+}
+
+pub fn nameiparent(path: &[u8], name: &mut [u8]) -> Inode {
+    namex(path, true, name)
 }

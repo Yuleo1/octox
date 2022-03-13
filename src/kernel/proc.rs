@@ -1,4 +1,5 @@
 use crate::file::File;
+use crate::fs::Inode;
 use crate::lazy::{SyncLazy, SyncOnceCell};
 use crate::memlayout::{kstack, TRAMPOLINE, TRAPFLAME};
 use crate::spinlock::{Mutex, MutexGuard};
@@ -172,7 +173,7 @@ pub struct ProcData {
     pub context: Context,
     pub name: String,
     pub ofile: [Option<Arc<File>>; NOFILE],
-    // inode
+    pub cwd: Inode,
 }
 unsafe impl Sync for ProcData {}
 unsafe impl Send for ProcData {}
@@ -477,7 +478,7 @@ pub fn init() {
 }
 
 impl Proc {
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             inner: Mutex::new(ProcInner::new(), "proc"),
             parent: UnsafeCell::new(None),
@@ -839,7 +840,7 @@ impl ProcInner {
 }
 
 impl ProcData {
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             kstack: 0,
             sz: 0,
@@ -848,6 +849,7 @@ impl ProcData {
             context: Context::new(),
             name: String::new(),
             ofile: array![_ => None; NOFILE],
+            cwd: Default::default(),
         }
     }
 }
