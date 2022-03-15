@@ -588,6 +588,12 @@ impl Inode {
             ip: self.ip.clone(),
         }
     }
+    pub fn is_some(&self) -> bool {
+        self.ip.is_some()
+    }
+    pub fn is_none(&self) -> bool {
+        self.ip.is_none()
+    }
 }
 
 #[cfg(target_os = "none")]
