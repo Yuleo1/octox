@@ -755,6 +755,7 @@ fn skipelem<'a, 'b>(path: &'a [u8], name: &'b mut [u8]) -> Option<&'a [u8]> {
 // If parent != None, return the inode for the parent and copy the final
 // path element into name, which must have room for DIRSIZ bytes.
 // Must be called inside a transaction since it calls iput().
+#[cfg(target_os = "none")]
 pub fn namex(path: &[u8], nameiparent: bool, name: &mut [u8]) -> Inode {
     let mut ip;
     if let Some(&b'/') = path.first() {
@@ -767,7 +768,6 @@ pub fn namex(path: &[u8], nameiparent: bool, name: &mut [u8]) -> Inode {
             Some(path) if path.first() != Some(&0) => {
                 let mut guard = ip.lock();
                 if guard.itype != IType::Dir {
-                    // drop
                     return Inode { ip : None };
                 }
                 if nameiparent && path[0] == b'\0' {
@@ -779,7 +779,6 @@ pub fn namex(path: &[u8], nameiparent: bool, name: &mut [u8]) -> Inode {
                     SleepLock::unlock(guard);
                     ip = next;
                 } else {
-                    // drop
                     return Inode { ip: None };
                 }
             },
@@ -792,11 +791,13 @@ pub fn namex(path: &[u8], nameiparent: bool, name: &mut [u8]) -> Inode {
     ip
 }
 
+#[cfg(target_os = "none")]
 pub fn namei(path: &[u8]) -> Inode {
     let mut name = [0u8; DIRSIZ];
     namex(path, false, &mut name)
 }
 
+#[cfg(target_os = "none")]
 pub fn nameiparent(path: &[u8], name: &mut [u8]) -> Inode {
     namex(path, true, name)
 }
