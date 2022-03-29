@@ -771,7 +771,7 @@ pub fn namex(path: &[u8], nameiparent: bool, name: &mut [u8]) -> Inode {
     }
     loop {
         match skipelem(path, name) {
-            Some(path) if path.first() != Some(&0) => {
+            Some(path) => {
                 let mut guard = ip.lock();
                 if guard.itype != IType::Dir {
                     return Inode { ip : None };
