@@ -1,4 +1,4 @@
-use crate::vm::{UVAddr, VAddr};
+use crate::{vm::{UVAddr, VAddr}, fs::Inode};
 use alloc::boxed::Box;
 use core::cell::UnsafeCell;
 use zerocopy::{AsBytes, FromBytes};
@@ -25,4 +25,14 @@ pub struct FsFile {
     readable: bool,
     writable: bool,
     off: UnsafeCell<usize>,
+    ip: Inode,
+}
+
+impl FsFile {
+    // dst is a user virtual address
+    fn read(&self, dst: &mut [u8]) -> Option<usize> {
+        let ip = self.ip.lock();
+        //ip.read(dst, off, n);
+        None
+    }
 }

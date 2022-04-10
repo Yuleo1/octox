@@ -74,6 +74,8 @@ pub mod trap;
 pub mod virtio_disk;
 #[cfg(target_os = "none")]
 pub mod vm;
+#[cfg(target_os = "none")]
+pub mod pipe;
 
 #[macro_export]
 macro_rules! kmain {

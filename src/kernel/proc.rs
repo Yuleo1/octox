@@ -1,5 +1,5 @@
 use crate::file::File;
-use crate::fs::Inode;
+use crate::fs::{Inode, self};
 use crate::lazy::{SyncLazy, SyncOnceCell};
 use crate::memlayout::{kstack, TRAMPOLINE, TRAPFLAME};
 use crate::spinlock::{Mutex, MutexGuard};
@@ -867,8 +867,7 @@ pub unsafe extern "C" fn fork_ret() -> ! {
         // regular process (e.g., because it calls sleep), and thus cannot
         // be run from main().
         FIRST = false;
-        // fsinit todo!
-        unimplemented!()
+        fs::init(ROOTDEV);
     }
     usertrap_ret()
 }
