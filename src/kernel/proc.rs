@@ -173,7 +173,7 @@ pub struct ProcData {
     pub context: Context,
     pub name: String,
     pub ofile: [Option<Arc<File>>; NOFILE],
-    pub cwd: Inode,
+    pub cwd: Option<Inode>,
 }
 unsafe impl Sync for ProcData {}
 unsafe impl Send for ProcData {}

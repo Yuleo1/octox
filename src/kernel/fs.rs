@@ -1,5 +1,6 @@
 #[cfg(target_os = "none")]
 use crate::bio::BCACHE;
+use crate::file::Major;
 #[cfg(target_os = "none")]
 use crate::log::LOG;
 use crate::param::{NINODE, ROOTDEV};
@@ -68,7 +69,7 @@ pub const MAXFILE: usize = NDIRECT + NINDIRECT;
 #[derive(Debug, Clone, Copy, Default)]
 struct DInode {
     itype: IType,              // File type
-    major: u16,                // Major Device Number (T_DEVICE only)
+    major: Major,                // Major Device Number (T_DEVICE only)
     minor: u16,                // Minor Device Number (T_DEVICE only)
     nlink: u16,                // Number of links to inode in file system
     size: u32,                 // Size of data (bytes)
@@ -240,7 +241,7 @@ pub static ITABLE: SyncLazy<Mutex<[Option<Arc<MInode>>; NINODE]>> = SyncLazy::ne
 // Inode passed from ITABLE.
 // Wrapper for in-memory inode i.e. MInode
 #[cfg(target_os = "none")]
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Inode {
     ip: Option<Arc<MInode>>,
 }
@@ -259,8 +260,8 @@ pub struct IData {
     dev: u32,
     inum: u32,
     valid: bool,
-    itype: IType,
-    major: u16,
+    pub itype: IType,
+    pub major: Major,
     minor: u16,
     nlink: u16,
     size: u32,
@@ -648,23 +649,25 @@ impl ITable {
         let mut guard = self.lock();
 
         // Is the inode already in the table?
-        let mut empty = &mut None;
+        let mut empty: Option<&mut Option<Arc<MInode>>> = None;
         for ip in guard.iter_mut() {
             match ip {
                 Some(ip) if ip.dev == dev && ip.inum == inum => {
                     return Inode::new(Arc::clone(ip));
                 }
                 None if empty.is_none() => {
-                    empty = ip;
+                    empty = Some(ip);
                 }
                 _ => (),
             }
         }
 
         // Recycle an inode entry
-        if empty.is_none() {
-            panic!("iget: no inodes");
-        }
+        let empty = match empty {
+            Some(ip) => ip,
+            None => panic!("iget: no inodes"),
+        };
+        
         let ip = Arc::new(MInode::new(dev, inum));
         empty.replace(Arc::clone(&ip));
         Inode::new(ip)
@@ -762,48 +765,48 @@ fn skipelem<'a, 'b>(path: &'a [u8], name: &'b mut [u8]) -> Option<&'a [u8]> {
 // path element into name, which must have room for DIRSIZ bytes.
 // Must be called inside a transaction since it calls iput().
 #[cfg(target_os = "none")]
-pub fn namex(path: &[u8], nameiparent: bool, name: &mut [u8]) -> Inode {
+pub fn namex(path: &[u8], nameiparent: bool, name: &mut [u8]) -> Option<Inode> {
     let mut ip;
     if let Some(&b'/') = path.first() {
         ip = ITABLE.get(ROOTDEV, ROOTINO);
     } else {
-        ip = unsafe { &(*CPUS.my_proc().unwrap().data.get()) }.cwd.dup();
+        ip = unsafe { &(*CPUS.my_proc().unwrap().data.get()) }.cwd.as_ref().unwrap().dup();
     }
     loop {
         match skipelem(path, name) {
             Some(path) => {
                 let mut guard = ip.lock();
                 if guard.itype != IType::Dir {
-                    return Inode { ip : None };
+                    return None;
                 }
                 if nameiparent && path[0] == b'\0' {
                     // Stop one level early.
                     SleepLock::unlock(guard);
-                    return ip;
+                    return Some(ip);
                 }
                 if let Some(next) = guard.dirlookup(name, Some(&mut 0)) {
                     SleepLock::unlock(guard);
                     ip = next;
                 } else {
-                    return Inode { ip: None };
+                    return None;
                 }
             },
             _ => break,
         }
     }
     if nameiparent {
-        return Inode { ip: None };
+        return None;
     }
-    ip
+    Some(ip)
 }
 
 #[cfg(target_os = "none")]
-pub fn namei(path: &[u8]) -> Inode {
+pub fn namei(path: &[u8]) -> Option<Inode> {
     let mut name = [0u8; DIRSIZ];
     namex(path, false, &mut name)
 }
 
 #[cfg(target_os = "none")]
-pub fn nameiparent(path: &[u8], name: &mut [u8]) -> Inode {
+pub fn nameiparent(path: &[u8], name: &mut [u8]) -> Option<Inode> {
     namex(path, true, name)
 }

@@ -7,7 +7,8 @@
 //   control-d -- end of line
 //   control-p -- print process list
 
-use crate::file::Device;
+use zerocopy::AsBytes;
+use crate::file::{Device, DEVSW, Major};
 use crate::proc::{procdump, CopyInOut, Process, CPUS, PROCS};
 use crate::spinlock::Mutex;
 use crate::uart;
@@ -41,7 +42,7 @@ impl Cons {
         }
     }
 }
-impl Device<UVAddr, u8> for Mutex<Cons> {
+impl Device<UVAddr> for Mutex<Cons> {
     //
     // user read()s from the console go here.
     // copy (up to) a whole input line to dst.
@@ -73,7 +74,7 @@ impl Device<UVAddr, u8> for Mutex<Cons> {
                 break;
             }
             // copy the input byte to the user-space buffer.
-            if p.either_copyout(From::from(Self::to_va(cdst)), &c).is_err() {
+            if p.either_copyout(From::from(Self::to_va(cdst.as_bytes())), &c).is_err() {
                 break;
             }
             size = n;
@@ -94,7 +95,7 @@ impl Device<UVAddr, u8> for Mutex<Cons> {
         let mut c = 0;
         for (n, csrc) in src.iter().enumerate() {
             let p = CPUS.my_proc().unwrap();
-            if p.either_copyin(&mut c, From::from(Self::to_va(csrc)))
+            if p.either_copyin(&mut c, From::from(Self::to_va(csrc.as_bytes())))
                 .is_err()
             {
                 return Some(n);
@@ -160,6 +161,7 @@ impl Mutex<Cons> {
 
 pub fn init() {
     unsafe { uart::init() }
+    DEVSW.lock().get_mut(Major::Console).replace(&CONS);
 }
 
 //

@@ -76,6 +76,10 @@ pub mod virtio_disk;
 pub mod vm;
 #[cfg(target_os = "none")]
 pub mod pipe;
+#[cfg(target_os = "none")]
+pub mod sysfile;
+#[cfg(target_os = "none")]
+pub mod fcntl;
 
 #[macro_export]
 macro_rules! kmain {
