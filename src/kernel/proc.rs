@@ -1,5 +1,5 @@
 use crate::file::File;
-use crate::fs::{Inode, self};
+use crate::fs::{self, Inode};
 use crate::lazy::{SyncLazy, SyncOnceCell};
 use crate::memlayout::{kstack, TRAMPOLINE, TRAPFLAME};
 use crate::spinlock::{Mutex, MutexGuard};

@@ -7,13 +7,13 @@
 //   control-d -- end of line
 //   control-p -- print process list
 
-use zerocopy::AsBytes;
-use crate::file::{Device, DEVSW, Major};
+use crate::file::{Device, Major, DEVSW};
 use crate::proc::{procdump, CopyInOut, Process, CPUS, PROCS};
 use crate::spinlock::Mutex;
 use crate::uart;
 use crate::vm::UVAddr;
 use core::num::Wrapping;
+use zerocopy::AsBytes;
 
 pub static CONS: Mutex<Cons> = Mutex::new(Cons::new(), "cons");
 
@@ -74,7 +74,9 @@ impl Device<UVAddr> for Mutex<Cons> {
                 break;
             }
             // copy the input byte to the user-space buffer.
-            if p.either_copyout(From::from(Self::to_va(cdst.as_bytes())), &c).is_err() {
+            if p.either_copyout(From::from(Self::to_va(cdst.as_bytes())), &c)
+                .is_err()
+            {
                 break;
             }
             size = n;
@@ -104,7 +106,6 @@ impl Device<UVAddr> for Mutex<Cons> {
         }
         Some(src.len())
     }
-
 
     fn major(&self) -> Major {
         Major::Console

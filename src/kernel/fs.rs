@@ -69,7 +69,7 @@ pub const MAXFILE: usize = NDIRECT + NINDIRECT;
 #[derive(Debug, Clone, Copy, Default)]
 struct DInode {
     itype: IType,              // File type
-    major: Major,                // Major Device Number (T_DEVICE only)
+    major: Major,              // Major Device Number (T_DEVICE only)
     minor: u16,                // Minor Device Number (T_DEVICE only)
     nlink: u16,                // Number of links to inode in file system
     size: u32,                 // Size of data (bytes)
@@ -667,7 +667,7 @@ impl ITable {
             Some(ip) => ip,
             None => panic!("iget: no inodes"),
         };
-        
+
         let ip = Arc::new(MInode::new(dev, inum));
         empty.replace(Arc::clone(&ip));
         Inode::new(ip)
@@ -770,7 +770,11 @@ pub fn namex(path: &[u8], nameiparent: bool, name: &mut [u8]) -> Option<Inode> {
     if let Some(&b'/') = path.first() {
         ip = ITABLE.get(ROOTDEV, ROOTINO);
     } else {
-        ip = unsafe { &(*CPUS.my_proc().unwrap().data.get()) }.cwd.as_ref().unwrap().dup();
+        ip = unsafe { &(*CPUS.my_proc().unwrap().data.get()) }
+            .cwd
+            .as_ref()
+            .unwrap()
+            .dup();
     }
     loop {
         match skipelem(path, name) {
@@ -790,7 +794,7 @@ pub fn namex(path: &[u8], nameiparent: bool, name: &mut [u8]) -> Option<Inode> {
                 } else {
                     return None;
                 }
-            },
+            }
             _ => break,
         }
     }
