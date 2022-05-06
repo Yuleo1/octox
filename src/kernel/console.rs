@@ -104,6 +104,11 @@ impl Device<UVAddr> for Mutex<Cons> {
         }
         Some(src.len())
     }
+
+
+    fn major(&self) -> Major {
+        Major::Console
+    }
 }
 
 impl Mutex<Cons> {
@@ -161,7 +166,7 @@ impl Mutex<Cons> {
 
 pub fn init() {
     unsafe { uart::init() }
-    DEVSW.lock().get_mut(Major::Console).replace(&CONS);
+    DEVSW.set(Major::Console, &CONS).unwrap();
 }
 
 //
