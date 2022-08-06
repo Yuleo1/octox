@@ -1,6 +1,5 @@
 #[cfg(target_os = "none")]
 use crate::bio::BCACHE;
-use crate::file::Major;
 #[cfg(target_os = "none")]
 use crate::log::LOG;
 use crate::param::{NINODE, ROOTDEV};
@@ -84,6 +83,19 @@ pub const BPB: u32 = (BSIZE * 8) as u32;
 
 // Directory is a file containing a sequence of dirent structures.
 pub const DIRSIZ: usize = 14;
+
+// Device Major Number
+#[repr(u16)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Major {
+    Null = 0,
+    Console = 1,
+}
+impl Default for Major {
+    fn default() -> Self {
+        Self::Null
+    }
+}
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default, AsBytes)]

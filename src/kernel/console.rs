@@ -7,7 +7,8 @@
 //   control-d -- end of line
 //   control-p -- print process list
 
-use crate::file::{Device, Major, DEVSW};
+use crate::file::{Device, DEVSW};
+use crate::fs::Major;
 use crate::proc::{procdump, CopyInOut, Process, CPUS, PROCS};
 use crate::spinlock::Mutex;
 use crate::uart;

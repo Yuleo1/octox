@@ -1,12 +1,9 @@
 #![no_std]
 #![feature(alloc_error_handler)]
-#![feature(untagged_unions)]
 #![feature(nonnull_slice_from_raw_parts)]
 #![feature(new_uninit)]
 #![feature(allocator_api)]
-#![feature(maybe_uninit_extra)]
 #![feature(negative_impls)]
-#![feature(const_fn_trait_bound)]
 #![feature(associated_type_bounds)]
 #![feature(never_type)]
 

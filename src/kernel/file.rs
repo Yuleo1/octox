@@ -1,6 +1,6 @@
 use crate::{
     fcntl::OpenOptions,
-    fs::{IData, Inode},
+    fs::{IData, Inode, Major},
     lazy::{SyncLazy, SyncOnceCell},
     param::{NDEV, NFILE},
     sleeplock::SleepLockGuard,
@@ -152,16 +152,3 @@ impl DevSW {
     }
 }
 
-impl Default for Major {
-    fn default() -> Self {
-        Self::Null
-    }
-}
-
-// Device Major Number
-#[repr(u16)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Major {
-    Null = 0,
-    Console = 1,
-}
