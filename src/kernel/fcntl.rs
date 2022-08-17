@@ -37,4 +37,7 @@ impl OpenOptions {
         self.create = create;
         self
     }
+    pub fn get_access_mode(&self) -> (bool, bool) {
+        (self.read, self.write)
+    }
 }

@@ -54,12 +54,12 @@ type FTable = Mutex<[Option<Arc<VFile>>; NFILE]>;
 
 impl FTable {
     // Allocate a file structure
-    pub fn alloc(
-        &self,
+    pub fn alloc<'a>(
+        &'a self,
         ip: Inode,
-        ip_guard: SleepLockGuard<IData>,
+        ip_guard: SleepLockGuard<'a, IData>,
         opts: &OpenOptions,
-    ) -> Option<File> {
+    ) -> Option<(File, SleepLockGuard<IData>)> {
         let mut guard = self.lock();
 
         let mut empty: Option<&mut Option<Arc<VFile>>> = None;
@@ -72,18 +72,19 @@ impl FTable {
                 _ => continue,
             }
         }
-        let empty = match empty {
-            Some(f) => f,
-            None => return None,
-        };
 
-        let vfile = match ip_guard.itype {
+        let f = empty?;
+        f.replace(Arc::new(match ip_guard.itype {
             IType::Device => VFile::Device(DEVSW.get(ip_guard.major).unwrap()),
             IType::File => VFile::FsFile(FsFile::new(ip)),
             _ => unreachable!(),
-        };
+        }));
 
-        todo!()
+        Some((File {
+            f: f.clone(), // ref count = 2
+            readable: opts.get_access_mode().0,
+            writable: opts.get_access_mode().1,
+        }, ip_guard))
     }
 }
 
@@ -151,4 +152,3 @@ impl DevSW {
         }
     }
 }
-
