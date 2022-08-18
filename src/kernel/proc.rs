@@ -172,7 +172,7 @@ pub struct ProcData {
     pub trapframe: Option<NonNull<Trapframe>>,
     pub context: Context,
     pub name: String,
-    pub ofile: [Option<Arc<File>>; NOFILE],
+    pub ofile: [Option<File>; NOFILE],
     pub cwd: Option<Inode>,
 }
 unsafe impl Sync for ProcData {}

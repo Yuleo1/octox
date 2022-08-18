@@ -14,7 +14,7 @@ use core::{cell::UnsafeCell, marker::PhantomData};
 pub static DEVSW: DevSW = DevSW::new();
 pub static FTABLE: SyncLazy<Mutex<[Option<Arc<VFile>>; NFILE]>> = SyncLazy::new(|| todo!());
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct File {
     f: Option<Arc<VFile>>,
     readable: bool,
