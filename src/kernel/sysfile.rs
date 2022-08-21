@@ -24,3 +24,12 @@ impl FileDesc {
         None
     }
 }
+
+
+use crate::syscall::SysCalls;
+
+impl SysCalls<'_> {
+    pub fn hoge(&self) -> () {
+        ()
+    }
+}
