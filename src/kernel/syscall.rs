@@ -1,6 +1,5 @@
-use alloc::sync::Arc;
-
 use crate::proc::{Proc, CPUS};
+use alloc::sync::Arc;
 
 // System call numbers
 #[repr(usize)]
@@ -57,13 +56,6 @@ impl SysCallNum {
     }
 }
 
-type SysResult = Result<usize, ()>;
-static SYSCALLS: [fn() -> SysResult; 1] = [hogehoge];
-
-pub fn hogehoge() -> SysResult {
-    Err(())
-}
-
 pub struct SysCalls<'a> {
     proc: &'a Arc<Proc>,
 }
@@ -73,7 +65,27 @@ impl SysCalls<'_> {
         let data = unsafe { &mut *self.proc.data.get() };
         let mut tf = unsafe { data.trapframe.unwrap().as_mut() };
         if let Ok(res) = match SysCallNum::from_usize(tf.a7) {
-            Some(num) => SYSCALLS[num as usize](),
+            Some(SysCallNum::SysFork) => todo!(),
+            Some(SysCallNum::SysExit) => todo!(),
+            Some(SysCallNum::SysWait) => todo!(),
+            Some(SysCallNum::SysPipe) => todo!(),
+            Some(SysCallNum::SysRead) => todo!(),
+            Some(SysCallNum::SysKill) => todo!(),
+            Some(SysCallNum::SysExec) => todo!(),
+            Some(SysCallNum::SysFstat) => todo!(),
+            Some(SysCallNum::SysChdir) => todo!(),
+            Some(SysCallNum::SysDup) => todo!(),
+            Some(SysCallNum::SysGetpid) => todo!(),
+            Some(SysCallNum::SysSbrk) => todo!(),
+            Some(SysCallNum::SysSleep) => todo!(),
+            Some(SysCallNum::SysUptime) => todo!(),
+            Some(SysCallNum::SysOpen) => todo!(),
+            Some(SysCallNum::SysWrite) => todo!(),
+            Some(SysCallNum::SysMknod) => todo!(),
+            Some(SysCallNum::SysUnlink) => todo!(),
+            Some(SysCallNum::SysLink) => todo!(),
+            Some(SysCallNum::SysMkdir) => todo!(),
+            Some(SysCallNum::SysClose) => todo!(),
             None => {
                 println!("unknown sys call {}", tf.a7);
                 Err(())
