@@ -1,4 +1,6 @@
-use crate::proc::{Proc, CPUS};
+use core::mem::size_of;
+
+use crate::{proc::{Proc, CPUS, ProcData, Trapframe}, vm::UVAddr};
 use alloc::sync::Arc;
 
 // System call numbers
@@ -58,13 +60,40 @@ impl SysCallNum {
 
 pub struct SysCalls<'a> {
     proc: &'a Arc<Proc>,
+    data: &'a mut ProcData,
+    tf: &'a mut Trapframe,
 }
 
 impl SysCalls<'_> {
-    fn call(&self) -> () {
-        let data = unsafe { &mut *self.proc.data.get() };
-        let mut tf = unsafe { data.trapframe.unwrap().as_mut() };
-        if let Ok(res) = match SysCallNum::from_usize(tf.a7) {
+    pub fn arg(&self, n: usize) -> usize {
+        match n {
+            0 => self.tf.a0,
+            1 => self.tf.a1,
+            2 => self.tf.a2,
+            3 => self.tf.a3,
+            4 => self.tf.a4,
+            5 => self.tf.a5,
+            _ => panic!("arg"),
+        }
+    }
+
+    // pub fn arg_addr(&self, arg: usize) -> UVAddr {
+    //     UVAddr::from(arg)
+    // }
+
+
+    // // Fetch the data at addr from the current process.
+    // pub fn fetch_addr(&self, addr: UVAddr, buf: &mut [u8]) -> Result<(), ()> {
+    //     if addr >= self.data.sz || addr + size_of::<usize>() > self.data.sz { // both tests needed, in case of overflow
+    //         return Err(())
+    //     }
+
+    //     self.data.uvm.unwrap().copyin(buf, addr)
+    // }
+
+
+    fn call(&mut self) -> () {
+        if let Ok(res) = match SysCallNum::from_usize(self.tf.a7) {
             Some(SysCallNum::SysFork) => todo!(),
             Some(SysCallNum::SysExit) => todo!(),
             Some(SysCallNum::SysWait) => todo!(),
@@ -87,19 +116,27 @@ impl SysCalls<'_> {
             Some(SysCallNum::SysMkdir) => todo!(),
             Some(SysCallNum::SysClose) => todo!(),
             None => {
-                println!("unknown sys call {}", tf.a7);
+                println!("unknown sys call {}", self.tf.a7);
                 Err(())
             }
         } {
-            tf.a0 = res;
+            self.tf.a0 = res;
         } else {
-            tf.a0 = -1 as isize as usize;
+            self.tf.a0 = -1 as isize as usize;
         }
     }
+
 }
 
 pub fn syscall() {
     let p = CPUS.my_proc().unwrap();
-    let syscalls = SysCalls { proc: p };
+    let data: &mut ProcData; 
+    let tf: &mut Trapframe;
+    unsafe {
+        data = &mut *p.data.get();
+        tf =  data.trapframe.unwrap().as_mut();
+    }
+    
+    let mut syscalls = SysCalls { proc: p, data, tf };
     syscalls.call()
 }
