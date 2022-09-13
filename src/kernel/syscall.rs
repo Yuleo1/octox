@@ -1,6 +1,9 @@
 use core::mem::size_of;
 
-use crate::{proc::{Proc, CPUS, ProcData, Trapframe}, vm::UVAddr};
+use crate::{
+    proc::{Proc, ProcData, Trapframe, CPUS},
+    vm::{Addr, UVAddr},
+};
 use alloc::sync::Arc;
 
 // System call numbers
@@ -77,21 +80,40 @@ impl SysCalls<'_> {
         }
     }
 
-    // pub fn arg_addr(&self, arg: usize) -> UVAddr {
-    //     UVAddr::from(arg)
-    // }
+    // Retrieve an argument as a UVAddr.
+    // Doesn't check legality, since
+    // copyin/copyout will do that.
+    pub fn arg_addr(&self, arg: usize) -> UVAddr {
+        UVAddr::from(arg)
+    }
 
+    // Fetch the data at addr from the current process.
+    pub fn fetch_addr(&mut self, addr: UVAddr, buf: &mut [u8]) -> Result<(), ()> {
+        if addr.into_usize() >= self.data.sz
+            || addr.into_usize() + size_of::<usize>() > self.data.sz
+        {
+            // both tests needed, in case of overflow
+            return Err(());
+        }
 
-    // // Fetch the data at addr from the current process.
-    // pub fn fetch_addr(&self, addr: UVAddr, buf: &mut [u8]) -> Result<(), ()> {
-    //     if addr >= self.data.sz || addr + size_of::<usize>() > self.data.sz { // both tests needed, in case of overflow
-    //         return Err(())
-    //     }
+        self.data.uvm.as_mut().unwrap().copyin(buf, addr)
+    }
 
-    //     self.data.uvm.unwrap().copyin(buf, addr)
-    // }
+    // Fetch the nul-terminated string at addr from the current process.
+    // Return length of string or error.
+    pub fn fetch_str(&mut self, addr: UVAddr, buf: &mut [u8]) -> Result<usize, ()> {
+        if self.data.uvm.as_mut().unwrap().copyinstr(buf, addr).is_err() {
+            Err(())
+        } else {
+            Ok(buf.iter().position(|&c| c == b'\0').unwrap_or(buf.len()))
+        }
+    }
 
-
+    // Fetch the nth word-sized system call argument as a null-terminated string.
+    // Copies into buf.
+    // Return string length if OK (including nul), or Err
+    // pub fn arg_str(&mut self, )
+    
     fn call(&mut self) -> () {
         if let Ok(res) = match SysCallNum::from_usize(self.tf.a7) {
             Some(SysCallNum::SysFork) => todo!(),
@@ -125,18 +147,17 @@ impl SysCalls<'_> {
             self.tf.a0 = -1 as isize as usize;
         }
     }
-
 }
 
 pub fn syscall() {
     let p = CPUS.my_proc().unwrap();
-    let data: &mut ProcData; 
+    let data: &mut ProcData;
     let tf: &mut Trapframe;
     unsafe {
         data = &mut *p.data.get();
-        tf =  data.trapframe.unwrap().as_mut();
+        tf = data.trapframe.unwrap().as_mut();
     }
-    
+
     let mut syscalls = SysCalls { proc: p, data, tf };
     syscalls.call()
 }
