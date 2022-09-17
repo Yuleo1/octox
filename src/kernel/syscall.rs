@@ -88,6 +88,7 @@ impl SysCalls<'_> {
     }
 
     // Fetch the data at addr from the current process.
+    // せっかくcopyinでZeroBytesクレートつかっているので、ここは境界指定して &mut T でいい
     pub fn fetch_addr(&mut self, addr: UVAddr, buf: &mut [u8]) -> Result<(), ()> {
         if addr.into_usize() >= self.data.sz
             || addr.into_usize() + size_of::<usize>() > self.data.sz
@@ -101,6 +102,7 @@ impl SysCalls<'_> {
 
     // Fetch the nul-terminated string at addr from the current process.
     // Return length of string or error.
+    // 最初から cstr 使うようにしてもいいかもしれない。copyinstrのところからね。
     pub fn fetch_str(&mut self, addr: UVAddr, buf: &mut [u8]) -> Result<usize, ()> {
         if self.data.uvm.as_mut().unwrap().copyinstr(buf, addr).is_err() {
             Err(())

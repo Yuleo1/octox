@@ -1,15 +1,13 @@
 use crate::lazy::SyncOnceCell;
 use crate::memlayout::{KERNBASE, PHYSTOP, PLIC, TRAMPOLINE, TRAPFLAME, UART0, VIRTIO0};
 use crate::proc::PROCS;
-use crate::riscv::{make_satp, pgroundup, PGSHIFT, PGSIZE};
+use crate::riscv::{registers::satp, pgroundup, PGSHIFT, PGSIZE, pteflags::*, sfence_vma};
 use alloc::boxed::Box;
-use bitflags::bitflags;
 use core::cmp::{Ord, PartialEq, PartialOrd};
 use core::convert::From;
 use core::marker::PhantomData;
 use core::ops::{Add, AddAssign, Deref, DerefMut, Index, IndexMut, Sub};
 use core::ptr;
-use riscv::{asm::sfence_vma, register::satp};
 use zerocopy::{AsBytes, FromBytes};
 
 use crate::trampoline::trampoline; // trampoline.rs
@@ -227,60 +225,37 @@ impl DerefMut for RawPageTable {
 #[repr(transparent)]
 pub struct PageTableEntry(usize);
 
-bitflags! {
-    /// PageTableEntry Attributes
-    pub struct PteFlags: usize {
-        const D = 1 << 7;
-        const A = 1 << 6;
-        const G = 1 << 5;
-        const U = 1 << 4;
-        const X = 1 << 3;
-        const W = 1 << 2;
-        const R = 1 << 1;
-        const V = 1 << 0;
-        const RW = Self::R.bits | Self::W.bits;
-        const RX = Self::R.bits | Self::X.bits;
-        const RWXU = Self::RW.bits | Self::X.bits | Self::U.bits;
-    }
-}
-
-impl PteFlags {
-    pub fn new(x: usize) -> Self {
-        Self { bits: x }
-    }
-}
-
 impl PageTableEntry {
     pub const fn new(value: usize) -> Self {
         Self(value)
     }
 
     pub fn is_v(&self) -> bool {
-        self.0 & PteFlags::V.bits() != 0
+        self.0 & PTE_V != 0
     }
 
     pub fn is_u(&self) -> bool {
-        self.0 & PteFlags::U.bits() != 0
+        self.0 & PTE_U != 0
     }
 
     pub fn rm_u(&mut self) {
-        self.0 &= !PteFlags::U.bits();
+        self.0 &= !PTE_U;
     }
 
     pub fn is_leaf(&self) -> bool {
-        self.0 & 0x3FF != PteFlags::V.bits()
+        self.0 & 0x3FF != PTE_V
     }
 
-    pub fn flags(&self) -> PteFlags {
-        PteFlags::new(self.0 & 0x3FF)
+    pub fn flags(&self) -> usize {
+        self.0 & 0x3FF
     }
 
     pub fn to_pa(&self) -> PAddr {
         ((self.0 >> 10) << 12).into()
     }
 
-    pub fn set(&mut self, pa: usize, attr: PteFlags) {
-        self.0 = ((pa >> 12) << 10) | attr.bits();
+    pub fn set(&mut self, pa: usize, attr: usize) {
+        self.0 = ((pa >> 12) << 10) | attr;
     }
 }
 
@@ -299,7 +274,7 @@ impl<V: VAddr> PageTable<V> {
     }
 
     pub fn as_satp(&self) -> usize {
-        make_satp(self.ptr as usize)
+        satp::make(satp::Mode::Sv39, 0, self.ptr as usize)
     }
 
     // Find the address of the PTE in page table pagetable
@@ -329,7 +304,7 @@ impl<V: VAddr> PageTable<V> {
                     return None;
                 }
                 pagetable = RawPageTable::new()?;
-                pte.set(pagetable as usize, PteFlags::V);
+                pte.set(pagetable as usize, PTE_V);
             }
         }
         unsafe { (*pagetable).get_mut(va.px(0)) }
@@ -359,8 +334,13 @@ impl<V: VAddr> PageTable<V> {
         mut va: V,
         mut pa: PAddr,
         size: usize,
-        perm: PteFlags,
+        perm: usize,
     ) -> Result<(), ()> {
+
+        if size == 0 {
+            panic!("mappages: size");
+        }
+
         let mut last = va + size - 1;
         va.rounddown();
         last.rounddown();
@@ -369,7 +349,7 @@ impl<V: VAddr> PageTable<V> {
             if pte.is_v() {
                 panic!("mappages: remap");
             }
-            pte.set(pa.into_usize(), perm | PteFlags::V);
+            pte.set(pa.into_usize(), perm | PTE_V);
             if va == last {
                 break Ok(());
             }
@@ -460,14 +440,14 @@ impl Uvm {
             panic!("inituvm: more than a page");
         }
         let mem = Box::into_raw(Box::<Page>::new_zeroed().assume_init());
-        self.mappages(0.into(), (mem as usize).into(), PGSIZE, PteFlags::RWXU)
+        self.mappages(0.into(), (mem as usize).into(), PGSIZE, PTE_W | PTE_R | PTE_X | PTE_U)
             .unwrap();
         ptr::copy_nonoverlapping(src.as_ptr(), mem as *mut u8, src.len());
     }
 
     // Allocate PTEs and physical memory to grow process from oldsz to
     // newsz, which need not be page aligned. Returns Option<newsz>.
-    pub fn alloc(&mut self, mut oldsz: usize, newsz: usize) -> Option<usize> {
+    pub fn alloc(&mut self, mut oldsz: usize, newsz: usize, xperm: usize) -> Option<usize> {
         if newsz < oldsz {
             return Some(oldsz);
         }
@@ -482,7 +462,7 @@ impl Uvm {
                 }
             };
             if self
-                .mappages(a.into(), (mem as usize).into(), PGSIZE, PteFlags::RWXU)
+                .mappages(a.into(), (mem as usize).into(), PGSIZE, PTE_R | PTE_U | xperm)
                 .is_err()
             {
                 unsafe {
@@ -691,26 +671,26 @@ impl Kvm {
     // add a mapping to the kernel page table.
     // only used when booting.
     // does not flush TLB or enable paging.
-    pub fn map(&mut self, va: KVAddr, pa: PAddr, size: usize, perm: PteFlags) {
+    pub fn map(&mut self, va: KVAddr, pa: PAddr, size: usize, perm: usize) {
         if self.page_table.mappages(va, pa, size, perm).is_err() {
             panic!("kvmmap");
         }
     }
     unsafe fn make(&mut self) {
-        self.map(UART0.into(), UART0.into(), PGSIZE, PteFlags::RW);
+        self.map(UART0.into(), UART0.into(), PGSIZE, PTE_R | PTE_W);
 
         // virtio mmio disk interface
-        self.map(VIRTIO0.into(), VIRTIO0.into(), PGSIZE, PteFlags::RW);
+        self.map(VIRTIO0.into(), VIRTIO0.into(), PGSIZE, PTE_R | PTE_W);
 
         // PLIC
-        self.map(PLIC.into(), PLIC.into(), 0x4000_00, PteFlags::RW);
+        self.map(PLIC.into(), PLIC.into(), 0x4000_00, PTE_R | PTE_W);
 
         // map kernel text executable and read-only.
         self.map(
             KERNBASE.into(),
             KERNBASE.into(),
             (etext as usize) - KERNBASE,
-            PteFlags::RX,
+            PTE_R | PTE_X,
         );
 
         // map kernel data and the physical RAM we'll make use of.
@@ -718,7 +698,7 @@ impl Kvm {
             (etext as usize).into(),
             (etext as usize).into(),
             PHYSTOP - (etext as usize),
-            PteFlags::RW,
+            PTE_R | PTE_W,
         );
 
         // map the trampoline for trap entry/exit to
@@ -727,7 +707,7 @@ impl Kvm {
             TRAMPOLINE.into(),
             (trampoline as usize).into(),
             PGSIZE,
-            PteFlags::RX,
+            PTE_R | PTE_X,
         );
 
         // map kernel stacks
@@ -747,6 +727,6 @@ pub fn kinit() {
 pub fn kinithart() {
     unsafe {
         satp::write(KVM.get().unwrap().as_satp());
-        sfence_vma(0, 0);
+        sfence_vma();
     }
 }

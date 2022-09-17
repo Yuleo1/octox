@@ -5,8 +5,8 @@ use crate::memlayout::{kstack, TRAMPOLINE, TRAPFLAME};
 use crate::spinlock::{Mutex, MutexGuard};
 use crate::swtch::swtch;
 use crate::trap::usertrap_ret;
-use crate::vm::{Page, PageAllocator, PteFlags, UVAddr, Uvm, VirtAddr, KVM};
-use crate::{param::*, riscv::*, trampoline::trampoline};
+use crate::vm::{Page, PageAllocator, UVAddr, Uvm, VirtAddr, KVM};
+use crate::{param::*, riscv::{*, pteflags::*}, trampoline::trampoline};
 use crate::{print, println};
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -373,7 +373,7 @@ impl Procs {
             let va = kstack(p).into();
             KVM.get_mut()
                 .unwrap()
-                .map(va, pa.into(), PGSIZE, PteFlags::RW);
+                .map(va, pa.into(), PGSIZE, PTE_R | PTE_W);
         }
     }
 
@@ -529,7 +529,7 @@ impl Process for Arc<Proc> {
                 TRAMPOLINE.into(),
                 (trampoline as usize).into(),
                 PGSIZE,
-                PteFlags::RX,
+                PTE_R | PTE_X,
             )
             .is_err()
         {
@@ -543,7 +543,7 @@ impl Process for Arc<Proc> {
                 TRAPFLAME.into(),
                 (unsafe { (*self.data.get()).trapframe.unwrap().as_ptr() as usize }).into(),
                 PGSIZE,
-                PteFlags::RW,
+                PTE_R | PTE_W,
             )
             .is_err()
         {
@@ -589,7 +589,7 @@ impl Process for Arc<Proc> {
         let mut sz = data.sz;
         let uvm = data.uvm.as_mut().unwrap();
         if n > 0 {
-            sz = uvm.alloc(sz, sz + n as usize).ok_or(())?;
+            sz = uvm.alloc(sz, sz + n as usize, PTE_W).ok_or(())?;
         } else if n < 0 {
             sz = uvm.dealloc(sz, (sz as isize + n) as usize);
         }

@@ -3,7 +3,7 @@ use crate::memlayout::*;
 use crate::param::NCPU;
 use core::arch::asm;
 use core::hint::unreachable_unchecked;
-use riscv::register::*;
+use crate::riscv::registers::{*, pmpcfg0::*};
 
 #[repr(C, align(16))]
 struct Stack([u8; 4096 * 4 * NCPU]);
@@ -22,12 +22,8 @@ pub unsafe fn start() -> ! {
     satp::write(0);
 
     // delegate all interrupts and exceptions to supervisor mode.
-    let x: usize = 0xffff;
-    asm!(
-        "csrw medeleg, {0}",
-        "csrw mideleg, {0}",
-        in(reg) x
-    );
+    medeleg::set_all();
+    mideleg::set_all();
     sie::set_sext();
     sie::set_ssoft();
     sie::set_stimer();
@@ -35,7 +31,7 @@ pub unsafe fn start() -> ! {
     // configure Physical Memory Protection to give supervisor mode
     // access to all of physical memory.
     pmpaddr0::write(0x3fffffffffffff);
-    pmpcfg0::write(0xf);
+    pmpcfg0::set_pmp(0, Range::TOR, Permission::RWX, false); // 0 < addr < pmpaddr0
 
     // ask for clock interrupts.
     timerinit();

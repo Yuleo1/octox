@@ -3,11 +3,9 @@ use crate::{
     fs::BSIZE,
     memlayout::VIRTIO0,
     proc::{Process, CPUS, PROCS},
-    riscv::{PGSHIFT, PGSIZE},
     spinlock::Mutex,
 };
 use alloc::sync::Arc;
-use bitflags::bitflags;
 use core::{
     convert::TryInto,
     sync::atomic::{fence, Ordering},
@@ -16,7 +14,6 @@ use core::{
 //
 // driver for qemu's virtio disk device.
 // uses qemu's mmio interface to virtio.
-// qemu presents a "legacy" virtio interface.
 //
 // qemu ... -drive file=fs.img,if=none,format=raw,id=x0 -device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0
 
@@ -34,17 +31,14 @@ enum VirtioMMIO {
     // 0x554d4552
     VenderId = 0x00c,
     DeviceFeatures = 0x010,
-    DriverFeatures = 0x020,
-    // page size for PFN, write-only
-    GuestPageSize = 0x028,
     // select queue, write-only
     QueueSel = 0x030,
     // max size of current queue, read-only
     QueueNumMax = 0x034,
     // size of current queue, write-only
     QueueNum = 0x038,
-    // physical page number of queue, read/write
-    QueuePfn = 0x040,
+    // ready bit
+    QueueReady = 0x044,
     // write-only
     QueueNotify = 0x050,
     // read-only
@@ -53,6 +47,15 @@ enum VirtioMMIO {
     InterruptAck = 0x064,
     // read/write
     Status = 0x070,
+    // physical address for descpritor table, write-only
+    QueueDescLow = 0x080,
+    QueueDescHigh = 0x084,
+    // physical address for available ring, write-only
+    DriverDescLow = 0x090,
+    DriverDescHigh = 0x094,
+    // physical address for used ring, write-only
+    DeviceDescLow = 0x0a0,
+    DeviceDescHigh = 0x0a4,
 }
 
 impl VirtioMMIO {
@@ -64,68 +67,55 @@ impl VirtioMMIO {
     }
 }
 
-bitflags! {
-    // Status register bits, from qemu virtio_config.h
-    struct VirtioStatus: u32 {
-        const ACKNOWLEDGE = 0b0001;
-        const DRIVER = 0b0010;
-        const DRIVER_OK = 0b0100;
-        const FEATURES_OK = 0b1000;
-    }
+type VirtioStatus = u32;
+// Status register bits, from qemu virtio_config.h
+mod virtio_status {
+    pub(crate) const ACKNOWLEDGE: u32 = 0b0001;
+    pub(crate) const DRIVER: u32 = 0b0010;
+    pub(crate) const DRIVER_OK: u32 = 0b0100;
+    pub(crate) const FEATURES_OK: u32 = 0b1000;
 }
 
-bitflags! {
-    // Device feature bits
-    struct VirtioFeatures: u32 {
-        // Disk is read-only
-        const BLK_F_RO = 1 << 5;
-        // Supports scsi command passthru
-        const BLK_F_SCSI = 1 << 7;
-        // Writeback mode available in config
-        const BLK_F_CONFIG_WCE = 1 << 11;
-        // support more than one vq
-        const BLK_F_MQ = 1 << 12;
-        const F_ANY_LAYOUT = 1 << 27;
-        const RING_F_INDIRECT_DESC = 1 << 28;
-        const RING_F_EVENT_IDX = 1 << 29;
-    }
+
+// Device feature bits
+mod virtio_features {
+    // Disk is read-only
+    pub(crate) const BLK_F_RO: u32 = 1 << 5;
+    // Supports scsi command passthru
+    pub(crate) const BLK_F_SCSI: u32 = 1 << 7;
+    // Writeback mode available in config
+    pub(crate) const BLK_F_CONFIG_WCE: u32 = 1 << 11;
+    // support more than one vq
+    pub(crate) const BLK_F_MQ: u32 = 1 << 12;
+    pub(crate) const F_ANY_LAYOUT: u32 = 1 << 27;
+    pub(crate) const RING_F_INDIRECT_DESC: u32 = 1 << 28;
+    pub(crate) const RING_F_EVENT_IDX: u32 = 1 << 29;
 }
 
 // this many virtio descriptors.
 // must be a power of 2.
 const NUM: usize = 8;
 
-#[repr(C, align(4096))]
+#[repr(C)]
 pub struct Disk {
-    // This struct consists of two contiguous pages of page-aligned
-    // physical memory, and is divided into three regions (descriptors,
-    // avail, and used), as explained in Section 2.6 of the vertio
-    // specification for the legacy interface.
-    // https://docs.oasis-open.org/virtio/virtio/v1.1/virtio-v1.1.pdf
-
-    // first page
-    pad1: PadPGA,
-    // the first region of the first page is a set (not a ring) of
-    // DMA descriptors, with which driver tells the device where to
-    // read and write individual disk operations. there are NUM
-    // descriptors. most commands consist of a "chain" (a linked list)
-    // of a cuple of these descriptors.
+    // a set (not a ring) of DMA descpritors, with which the
+    // driver tells the device where to read and write individual
+    // disk operations. there are NUM descpritors.
+    // most commands consists of a "chain" (a linked list) of couple of
+    // these descriptors.
     desc: [VirtqDesc; NUM],
-    // next is a ring in which the driver writes descriptor number
+
+    // a ring in which the driver writes descriptor numbers
     // that the driver would like the device to process. it only
     // includes the head descriptor of each chain. the ring has
     // NUM elements.
     avail: VirtqAvail,
 
-    // second page
-    pad2: PadPGA,
-    // finally a ring in which the device writes descriptor numbers that
+    // a ring in which the device writes descriptor numbers that
     // the device has finished processing (just the head of each chain).
     // there are NUM used ring entries
     used: VirtqUsed,
 
-    // end
-    pad3: PadPGA,
     // our own book-keeping
     free: [bool; NUM], // is a descriptor free ?
     used_idx: u16,     // we've looked this far in used[2..NUM].
@@ -140,17 +130,6 @@ pub struct Disk {
     ops: [VirtioBlkReq; NUM],
 }
 
-// zero-sized struct for a page of page-aligned physical memory.
-#[derive(Debug, Clone, Copy)]
-#[repr(C, align(4096))]
-struct PadPGA();
-
-impl PadPGA {
-    const fn new() -> Self {
-        Self()
-    }
-}
-
 // a single descriptor, from the spc
 #[derive(Debug, Clone, Copy)]
 #[repr(C, align(16))]
@@ -161,14 +140,13 @@ struct VirtqDesc {
     next: u16,
 }
 
-bitflags! {
-    struct VirtqDescFlags: u16 {
-        const FREED = 0b00;
-        // chained with another descriptor
-        const NEXT = 0b01;
-        // device writes (vs read)
-        const WRITE = 0b10;
-    }
+type VirtqDescFlags = u16;
+mod virtq_desc_flags {
+    pub(crate) const FREED: u16 = 0b00;
+    // chained with another descriptor
+    pub(crate) const NEXT: u16 = 0b01;
+    // device writes (vs read)
+    pub(crate) const WRITE: u16 = 0b10;
 }
 
 impl VirtqDesc {
@@ -176,7 +154,7 @@ impl VirtqDesc {
         Self {
             addr: 0,
             len: 0,
-            flags: VirtqDescFlags::FREED,
+            flags: virtq_desc_flags::FREED,
             next: 0,
         }
     }
@@ -285,65 +263,94 @@ impl VirtioBlkReq {
 impl Disk {
     const fn new() -> Self {
         Self {
-            pad1: PadPGA::new(),
             desc: [VirtqDesc::new(); NUM],
             avail: VirtqAvail::new(),
-            pad2: PadPGA::new(),
             used: VirtqUsed::new(),
-            pad3: PadPGA::new(),
             free: [false; NUM],
             used_idx: 0,
             info: [Info::new(); NUM],
             ops: [VirtioBlkReq::new(); NUM],
         }
     }
+
     unsafe fn init(&mut self) {
-        let mut status: VirtioStatus = VirtioStatus::empty();
+        let mut status: VirtioStatus = 0;
 
         if VirtioMMIO::MagicValue.read() != 0x74726976
-            || VirtioMMIO::Version.read() != 1
+            || VirtioMMIO::Version.read() != 2
             || VirtioMMIO::DeviceId.read() != 2
             || VirtioMMIO::VenderId.read() != 0x554d4551
         {
             panic!("could not find virtio disk");
         }
 
-        status.insert(VirtioStatus::ACKNOWLEDGE);
-        VirtioMMIO::Status.write(status.bits());
-        status.insert(VirtioStatus::DRIVER);
-        VirtioMMIO::Status.write(status.bits());
+        // reset device
+        VirtioMMIO::Status.write(status);
+
+        // set ACKNOWLEDGE status bit
+        status |= virtio_status::ACKNOWLEDGE;
+        VirtioMMIO::Status.write(status);
+
+        // set DRIVER status bit
+        status |= virtio_status::DRIVER;
+        VirtioMMIO::Status.write(status);
 
         // negotiate features
-        let features = VirtioFeatures::from_bits_truncate(VirtioMMIO::DeviceFeatures.read())
-            - (VirtioFeatures::BLK_F_RO
-                | VirtioFeatures::BLK_F_SCSI
-                | VirtioFeatures::BLK_F_CONFIG_WCE
-                | VirtioFeatures::BLK_F_MQ
-                | VirtioFeatures::F_ANY_LAYOUT
-                | VirtioFeatures::RING_F_EVENT_IDX
-                | VirtioFeatures::RING_F_INDIRECT_DESC);
-        VirtioMMIO::DriverFeatures.write(features.bits());
+        let mut features = VirtioMMIO::DeviceFeatures.read();
+        features &= !(virtio_features::BLK_F_RO);
+        features &= !(virtio_features::BLK_F_SCSI);
+        features &= !(virtio_features::BLK_F_CONFIG_WCE);
+        features &= !(virtio_features::BLK_F_MQ);
+        features &= !(virtio_features::F_ANY_LAYOUT);
+        features &= !(virtio_features::RING_F_EVENT_IDX);
+        features &= !(virtio_features::RING_F_INDIRECT_DESC);
+        VirtioMMIO::DeviceFeatures.write(features);
 
         // tell device that feature negotiation is complete.
-        status.insert(VirtioStatus::FEATURES_OK);
-        VirtioMMIO::Status.write(status.bits());
+        status |= virtio_status::FEATURES_OK;
+        VirtioMMIO::Status.write(status);
 
-        // tell device we're completely ready.
-        status.insert(VirtioStatus::DRIVER_OK);
-        VirtioMMIO::Status.write(status.bits());
-
-        VirtioMMIO::GuestPageSize.write(PGSIZE as _);
+        // re-read status to ensure FEATURES_OK is set.
+        status = VirtioMMIO::Status.read();
+        assert!(
+            status & virtio_status::FEATURES_OK != 0,
+            "virtio disk FEATURES_OK unset"
+        );
 
         // initialize queue 0.
         VirtioMMIO::QueueSel.write(0);
+
+        // ensure queue 0 is not in use
+        assert!(
+            VirtioMMIO::QueueReady.read() == 0,
+            "virtio disk shoud not be ready"
+        );
+
+        // check maximum queue size.
         let max = VirtioMMIO::QueueNumMax.read();
         assert!(max != 0, "virtio disk has no queue 0");
         assert!(max >= NUM as u32, "virtio disk max queue too short");
+
+        // set queue size.
         VirtioMMIO::QueueNum.write(NUM as _);
-        VirtioMMIO::QueuePfn.write((self as *const _ as usize >> PGSHIFT) as _);
+
+        // write physical addresses.
+        VirtioMMIO::QueueDescLow.write(&self.desc as *const _ as u64 as u32);
+        VirtioMMIO::QueueDescHigh.write((&self.desc as *const _ as u64 >> 32) as u32);
+        VirtioMMIO::DriverDescLow.write(&self.avail as *const _ as u64 as u32);
+        VirtioMMIO::DriverDescHigh.write((&self.avail as *const _ as u64 >> 32) as u32);
+        VirtioMMIO::DeviceDescLow.write(&self.used as *const _ as u64 as u32);
+        VirtioMMIO::DeviceDescHigh.write((&self.used as *const _ as u64 >> 32) as u32);
+
+        // queue is ready.
+        VirtioMMIO::QueueReady.write(0x1);
 
         // all NUM descriptors start out unused.
         self.free.iter_mut().for_each(|f| *f = true);
+
+        // tell device we're completely ready.
+        status |= virtio_status::DRIVER_OK;
+        VirtioMMIO::Status.write(status);
 
         // plic.rs and trap.rs arrange for interrupts from VIRTIO0_IRQ.
     }
@@ -368,7 +375,7 @@ impl Disk {
         assert!(!self.free[i], "free_desc 2");
         self.desc[i].addr = 0;
         self.desc[i].len = 0;
-        self.desc[i].flags = VirtqDescFlags::empty();
+        self.desc[i].flags = 0;
         self.desc[i].next = 0;
         self.free[i] = true;
         PROCS.wakeup(&self.free[0] as *const _ as usize);
@@ -381,7 +388,7 @@ impl Disk {
             let flag = desc.flags;
             let nxt = desc.next;
             self.free_desc(i);
-            if !(flag & VirtqDescFlags::NEXT).is_empty() {
+            if (flag & virtq_desc_flags::NEXT) != 0 {
                 i = nxt as usize;
             } else {
                 break;
@@ -441,23 +448,23 @@ impl Mutex<Disk> {
 
         guard.desc[idx[0]].addr = buf0 as *mut _ as u64;
         guard.desc[idx[0]].len = core::mem::size_of::<VirtioBlkReq>().try_into().unwrap();
-        guard.desc[idx[0]].flags = VirtqDescFlags::NEXT;
+        guard.desc[idx[0]].flags = virtq_desc_flags::NEXT;
         guard.desc[idx[0]].next = idx[1].try_into().unwrap();
 
         guard.desc[idx[1]].addr = raw_data as u64;
         guard.desc[idx[1]].len = BSIZE.try_into().unwrap();
         guard.desc[idx[1]].flags = if write {
-            VirtqDescFlags::empty() // device reads b->data
+            0
         } else {
-            VirtqDescFlags::WRITE // device writes b->data
+            virtq_desc_flags::WRITE // device writes b->data
         };
-        guard.desc[idx[1]].flags |= VirtqDescFlags::NEXT;
+        guard.desc[idx[1]].flags |= virtq_desc_flags::NEXT;
         guard.desc[idx[1]].next = idx[2].try_into().unwrap();
 
         guard.info[idx[0]].status = 0xff; // device writes 0 on success
         guard.desc[idx[2]].addr = &mut guard.info[idx[0]].status as *mut _ as u64;
         guard.desc[idx[2]].len = 1;
-        guard.desc[idx[2]].flags = VirtqDescFlags::WRITE; // device write the status
+        guard.desc[idx[2]].flags = virtq_desc_flags::WRITE; // device write the status
         guard.desc[idx[2]].next = 0;
 
         // record struct buf for intr()

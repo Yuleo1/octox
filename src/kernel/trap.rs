@@ -2,14 +2,12 @@ use crate::{
     memlayout::{TRAMPOLINE, TRAPFLAME, UART0_IRQ, VIRTIO0_IRQ},
     plic,
     proc::{Cpus, ProcState, Process, CPUS, PROCS},
-    riscv::{intr_get, intr_off, intr_on, r_sstatus, w_sip, w_sstatus, PGSIZE},
+    riscv::{*, registers::{*, scause::*}},
     spinlock::Mutex,
     trampoline::trampoline,
     uart::UART,
     virtio_disk::DISK,
 };
-use riscv::register::*;
-use scause::{Exception, Interrupt, Trap};
 
 extern "C" {
     fn uservec();
@@ -163,7 +161,6 @@ pub extern "C" fn kerneltrap() {
     let sepc = sepc::read();
     let sstatus = sstatus::read();
     let scause = scause::read();
-    let sstatus_bits = r_sstatus();
 
     assert!(
         sstatus.spp() == sstatus::SPP::Supervisor,
@@ -197,7 +194,7 @@ pub extern "C" fn kerneltrap() {
     // the yielding() may have caused some traps to occur.
     // so restore trap registers for use by kernelvec.rs's sepc instruction.
     sepc::write(sepc);
-    w_sstatus(sstatus_bits);
+    sstatus.restore();
 }
 
 fn clockintr() {
@@ -243,7 +240,10 @@ fn devintr(intr: Interrupt) -> Option<Intr> {
 
             // acknowledge the software interrupt by clearing
             // the SSIP bit in sip.
-            w_sip(sip::read().bits() & !2);
+            unsafe {
+                sip::clear_ssoft();
+            }
+
             Some(Intr::Timer)
         }
         _ => None,
