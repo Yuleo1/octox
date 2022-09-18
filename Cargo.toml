@@ -13,4 +13,3 @@ name = "kernel"
 path = "src/kernel/main.rs"
 
 [dependencies]
-array-macro = "2.1.0"

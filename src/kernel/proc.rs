@@ -8,11 +8,10 @@ use crate::swtch::swtch;
 use crate::trap::usertrap_ret;
 use crate::vm::{Page, PageAllocator, UVAddr, Uvm, VirtAddr, KVM};
 use crate::{param::*, riscv::{*, pteflags::*}, trampoline::trampoline};
-use crate::{print, println};
+use crate::{print, println, array};
 use alloc::string::String;
 use alloc::vec::Vec;
 use alloc::{boxed::Box, sync::Arc};
-use array_macro::array;
 use core::arch::asm;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use core::{cell::UnsafeCell, ops::Drop, ptr::NonNull};
@@ -244,7 +243,7 @@ impl Context {
 
 impl Cpus {
     const fn new() -> Self {
-        Self(array![_ => UnsafeCell::new(Cpu::new()); NCPU])
+        Self(array![UnsafeCell::new(Cpu::new()); NCPU])
     }
 
     // Must be called with interrupts disabled,
@@ -848,7 +847,7 @@ impl ProcData {
             trapframe: None,
             context: Context::new(),
             name: String::new(),
-            ofile: array![_ => None; NOFILE],
+            ofile: array![None; NOFILE],
             cwd: Default::default(),
         }
     }

@@ -19,9 +19,9 @@ use crate::{
     sleeplock::{SleepLock, SleepLockGuard},
     spinlock::Mutex,
     virtio_disk::DISK,
+    array,
 };
 use alloc::sync::{Arc, Weak};
-use array_macro::array;
 use core::ops::{Deref, DerefMut};
 
 pub static BCACHE: BCache = BCache::new();
@@ -175,7 +175,7 @@ impl<'a> DoubleEndedIterator for Iter<'a> {
 impl BCache {
     const fn new() -> Self {
         Self {
-            buf: array![_ => SleepLock::new([0; BSIZE], "buffer"); NBUF],
+            buf: array![SleepLock::new([0; BSIZE], "buffer"); NBUF],
             lru: Mutex::new(Lru::new(), "bcache"),
         }
     }
