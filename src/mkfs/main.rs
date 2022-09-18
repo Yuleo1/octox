@@ -3,9 +3,8 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::process;
-use zerocopy::AsBytes;
+use mkfs::{fs::*, param::*, stat::*, defs::*};
 
-use mkfs::{fs::*, param::*, stat::*};
 const NINODES: usize = 200;
 
 // Disk layout:
@@ -138,11 +137,11 @@ impl FsImg {
                     din.addrs[NDIRECT] = (self.freeblock as u32).to_le();
                     self.freeblock += 1;
                 }
-                self.rsect(u32::from_le(din.addrs[NDIRECT]), indirect.as_bytes_mut())?;
+                self.rsect(u32::from_le(din.addrs[NDIRECT]), mkfs_as_bytes_mut(&mut indirect))?;
                 if u32::from_le(indirect[fbn - NDIRECT]) == 0 {
                     indirect[fbn - NDIRECT] = (self.freeblock as u32).to_le();
                     self.freeblock += 1;
-                    self.wsect(u32::from_le(din.addrs[NDIRECT]), indirect.as_bytes())?;
+                    self.wsect(u32::from_le(din.addrs[NDIRECT]), mkfs_as_bytes(&indirect))?;
                 }
                 x = u32::from_le(indirect[fbn - NDIRECT]);
             }
@@ -201,13 +200,13 @@ fn main() -> std::io::Result<()> {
 
     let mut de: DirEnt = Default::default();
     de.inum = (rootino as u16).to_le();
-    de.name[..".".len()].copy_from_slice(".".as_bytes());
-    fsimg.iappend(rootino, de.as_bytes())?;
+    de.name[..".".len()].copy_from_slice(mkfs_as_bytes(&"."));
+    fsimg.iappend(rootino, mkfs_as_bytes(&de))?;
 
     let mut de: DirEnt = Default::default();
     de.inum = (rootino as u16).to_le();
-    de.name[.."..".len()].copy_from_slice("..".as_bytes());
-    fsimg.iappend(rootino, de.as_bytes())?;
+    de.name[.."..".len()].copy_from_slice(mkfs_as_bytes(&".."));
+    fsimg.iappend(rootino, mkfs_as_bytes(&de))?;
 
     for path in args[2..]
         .iter()
@@ -232,8 +231,8 @@ fn main() -> std::io::Result<()> {
 
         let mut de: DirEnt = Default::default();
         de.inum = (inum as u16).to_le();
-        de.name[..shortname.len()].copy_from_slice(shortname.as_bytes());
-        fsimg.iappend(rootino, de.as_bytes())?;
+        de.name[..shortname.len()].copy_from_slice(mkfs_as_bytes(&shortname));
+        fsimg.iappend(rootino, mkfs_as_bytes(&de))?;
 
         while fd.read(&mut buf)? > 0 {
             fsimg.iappend(inum, &buf)?;
@@ -266,4 +265,16 @@ struct DInode {
     nlink: u16,                // Number of links to inode in file system
     size: u32,                 // Size of data (bytes)
     addrs: [u32; NDIRECT + 1], // Data block address
+}
+
+fn mkfs_as_bytes<T: ?Sized>(refs: &T) -> &[u8] {
+    unsafe {
+        as_bytes(refs)
+    }
+}
+
+fn mkfs_as_bytes_mut<T: ?Sized>(refs: &mut T) -> &mut [u8] {
+    unsafe {
+        as_bytes_mut(refs)
+    }
 }

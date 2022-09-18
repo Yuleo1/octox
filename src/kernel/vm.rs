@@ -1,3 +1,4 @@
+use crate::defs::{as_bytes, as_bytes_mut};
 use crate::lazy::SyncOnceCell;
 use crate::memlayout::{KERNBASE, PHYSTOP, PLIC, TRAMPOLINE, TRAPFLAME, UART0, VIRTIO0};
 use crate::proc::PROCS;
@@ -8,7 +9,6 @@ use core::convert::From;
 use core::marker::PhantomData;
 use core::ops::{Add, AddAssign, Deref, DerefMut, Index, IndexMut, Sub};
 use core::ptr;
-use zerocopy::{AsBytes, FromBytes};
 
 use crate::trampoline::trampoline; // trampoline.rs
 extern "C" {
@@ -557,8 +557,10 @@ impl Uvm {
     // Copy from kernel to user.
     // Copy bytes from src to virtual address dstva in a given page table.
     // Return Result<(), ()>
-    pub fn copyout<T: AsBytes + ?Sized>(&mut self, mut dstva: UVAddr, src: &T) -> Result<(), ()> {
-        let src = src.as_bytes();
+    pub fn copyout<T: ?Sized>(&mut self, mut dstva: UVAddr, src: &T) -> Result<(), ()> {
+        let src = unsafe {
+            as_bytes(src)
+        };
         let mut len = src.len();
         let mut offset = 0;
         while len > 0 {
@@ -580,12 +582,14 @@ impl Uvm {
     // Copy from user to kernel.
     // Copy len bytes to dst from virtual address srcva in a given page table.
     // Return Result<(), ()>
-    pub fn copyin<T: AsBytes + FromBytes + ?Sized>(
+    pub fn copyin<T: ?Sized>(
         &mut self,
         dst: &mut T,
         mut srcva: UVAddr,
     ) -> Result<(), ()> {
-        let dst = dst.as_bytes_mut();
+        let dst = unsafe {
+            as_bytes_mut(dst)
+        };
         let mut len = dst.len();
         let mut offset = 0;
         while len > 0 {

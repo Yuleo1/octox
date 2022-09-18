@@ -14,4 +14,3 @@ path = "src/kernel/main.rs"
 
 [dependencies]
 array-macro = "2.1.0"
-zerocopy = "0.6.0"

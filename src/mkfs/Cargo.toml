@@ -12,4 +12,3 @@ path = "main.rs"
 path = "../kernel/lib.rs"
 
 [dependencies]
-zerocopy = "0.6.0"

@@ -79,6 +79,7 @@ pub mod virtio_disk;
 pub mod vm;
 #[cfg(target_os = "none")]
 pub mod syscall;
+pub mod defs;
 
 #[macro_export]
 macro_rules! kmain {

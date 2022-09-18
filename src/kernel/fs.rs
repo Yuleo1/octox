@@ -17,7 +17,6 @@ use crate::{
 };
 use alloc::sync::Arc;
 use core::ops::Deref;
-use zerocopy::AsBytes;
 
 // File system implementation. Five layers:
 //   - Blocks: allocator for raw disk blocks.
@@ -98,7 +97,7 @@ impl Default for Major {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, Default, AsBytes)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct DirEnt {
     pub inum: u16,
     pub name: [u8; DIRSIZ],
