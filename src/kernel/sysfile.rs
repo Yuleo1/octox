@@ -1,4 +1,6 @@
 use crate::{file, proc::CPUS};
+use crate::syscall::SysCalls;
+
 // Raw file descriptors
 pub type RawFd = usize;
 
@@ -22,7 +24,6 @@ impl FileDesc {
     }
 }
 
-use crate::syscall::SysCalls;
 
 impl SysCalls<'_> {
     pub fn hoge(&self) -> () {

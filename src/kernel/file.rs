@@ -1,6 +1,7 @@
+#[cfg(target_os = "none")]
 use crate::{
     fcntl::OpenOptions,
-    fs::{IData, Inode, Major},
+    fs::{IData, Inode},
     lazy::{SyncLazy, SyncOnceCell},
     param::{NDEV, NFILE},
     sleeplock::SleepLockGuard,
@@ -8,25 +9,34 @@ use crate::{
     stat::IType,
     vm::{UVAddr, VAddr}, array,
 };
+#[cfg(target_os = "none")]
 use alloc::sync::Arc;
+#[cfg(target_os = "none")]
 use core::{cell::UnsafeCell, marker::PhantomData};
 
+#[cfg(target_os = "none")]
 pub static DEVSW: DevSW = DevSW::new();
+#[cfg(target_os = "none")]
 pub static FTABLE: SyncLazy<Mutex<[Option<Arc<VFile>>; NFILE]>> = SyncLazy::new(|| todo!());
 
+#[cfg(target_os = "none")]
 #[derive(Default, Clone)]
 pub struct File {
     f: Option<Arc<VFile>>,
     readable: bool,
     writable: bool,
 }
+
+#[cfg(target_os = "none")]
 pub enum VFile {
     Device(&'static dyn Device<UVAddr>),
     FsFile(FsFile<UVAddr>),
     Pipe,
 }
 
+
 // Device functions, map this trait using dyn
+#[cfg(target_os = "none")]
 pub trait Device<V: VAddr>: Send + Sync {
     fn read(&self, dst: &mut [u8]) -> Option<usize>;
     fn write(&self, src: &[u8]) -> Option<usize>;
@@ -38,20 +48,25 @@ pub trait Device<V: VAddr>: Send + Sync {
     }
     fn major(&self) -> Major;
 }
+
+#[cfg(target_os = "none")]
 impl core::fmt::Debug for dyn Device<UVAddr> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "Device fn {:?}", self.major())
     }
 }
 
+#[cfg(target_os = "none")]
 pub struct FsFile<V: VAddr> {
     off: UnsafeCell<u32>,
     ip: Inode,
     _maker: PhantomData<V>,
 }
 
+#[cfg(target_os = "none")]
 type FTable = Mutex<[Option<Arc<VFile>>; NFILE]>;
 
+#[cfg(target_os = "none")]
 impl FTable {
     // Allocate a file structure
     pub fn alloc<'a>(
@@ -91,6 +106,7 @@ impl FTable {
     }
 }
 
+#[cfg(target_os = "none")]
 impl FsFile<UVAddr> {
     pub fn new(ip: Inode) -> Self {
         Self {
@@ -118,10 +134,12 @@ impl FsFile<UVAddr> {
     }
 }
 
+#[cfg(target_os = "none")]
 pub struct DevSW {
     table: [SyncOnceCell<&'static dyn Device<UVAddr>>; NDEV],
 }
 
+#[cfg(target_os = "none")]
 impl core::fmt::Debug for DevSW {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "[")?;
@@ -137,6 +155,7 @@ impl core::fmt::Debug for DevSW {
     }
 }
 
+#[cfg(target_os = "none")]
 impl DevSW {
     pub const fn new() -> Self {
         Self {
@@ -156,5 +175,18 @@ impl DevSW {
             Some(&dev) => Some(dev),
             None => None,
         }
+    }
+}
+
+// Device Major Number
+#[repr(u16)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Major {
+    Null = 0,
+    Console = 1,
+}
+impl Default for Major {
+    fn default() -> Self {
+        Self::Null
     }
 }

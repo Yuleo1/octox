@@ -8,8 +8,7 @@
 //   control-p -- print process list
 
 use crate::defs::as_bytes;
-use crate::file::{Device, DEVSW};
-use crate::fs::Major;
+use crate::file::{Device, DEVSW, Major};
 use crate::proc::{procdump, CopyInOut, Process, CPUS, PROCS};
 use crate::spinlock::Mutex;
 use crate::uart;

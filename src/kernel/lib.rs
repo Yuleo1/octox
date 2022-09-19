@@ -46,7 +46,6 @@ pub mod buddy;
 pub mod defs;
 #[cfg(target_os = "none")]
 pub mod fcntl;
-#[cfg(target_os = "none")]
 pub mod file;
 pub mod fs;
 #[cfg(target_os = "none")]
