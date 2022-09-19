@@ -61,7 +61,7 @@ impl SysCallNum {
 }
 
 pub struct SysCalls<'a> {
-    proc: &'a Arc<Proc>,
+    pub proc: &'a Arc<Proc>,
     data: &'a mut ProcData,
     tf: &'a mut Trapframe,
 }

@@ -6,7 +6,7 @@ use crate::{
     sleeplock::SleepLockGuard,
     spinlock::Mutex,
     stat::IType,
-    vm::{UVAddr, VAddr},
+    vm::{UVAddr, VAddr}, array,
 };
 use alloc::sync::Arc;
 use core::{cell::UnsafeCell, marker::PhantomData};
@@ -122,22 +122,25 @@ pub struct DevSW {
     table: [SyncOnceCell<&'static dyn Device<UVAddr>>; NDEV],
 }
 
+impl core::fmt::Debug for DevSW {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "[")?;
+        for (count, v) in self.table.iter().enumerate() {
+            if count != 0 { write!(f, ", ")?; }
+            if let Some(&v) = v.get() {
+                write!(f, "{:?}", v)?;
+            } else {
+                write!(f, "None")?;
+            } 
+        }
+        write!(f, "]")
+    }
+}
+
 impl DevSW {
     pub const fn new() -> Self {
         Self {
-            // NDEV = 10
-            table: [
-                SyncOnceCell::new(),
-                SyncOnceCell::new(),
-                SyncOnceCell::new(),
-                SyncOnceCell::new(),
-                SyncOnceCell::new(),
-                SyncOnceCell::new(),
-                SyncOnceCell::new(),
-                SyncOnceCell::new(),
-                SyncOnceCell::new(),
-                SyncOnceCell::new(),
-            ],
+            table: array![SyncOnceCell::new(); NDEV],
         }
     }
     pub fn set(
