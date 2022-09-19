@@ -7,8 +7,12 @@ use crate::spinlock::{Mutex, MutexGuard};
 use crate::swtch::swtch;
 use crate::trap::usertrap_ret;
 use crate::vm::{Page, PageAllocator, UVAddr, Uvm, VirtAddr, KVM};
-use crate::{param::*, riscv::{*, pteflags::*}, trampoline::trampoline};
-use crate::{print, println, array};
+use crate::{array, print, println};
+use crate::{
+    param::*,
+    riscv::{pteflags::*, *},
+    trampoline::trampoline,
+};
 use alloc::string::String;
 use alloc::vec::Vec;
 use alloc::{boxed::Box, sync::Arc};
@@ -148,33 +152,29 @@ pub unsafe trait CopyInOut {
     unsafe fn either_copyout<T: ?Sized>(&self, dst: VirtAddr, src: &T) -> Result<(), ()>;
     // Copy from either a user address, or kernel address,
     // Return Result<(), ()>
-    unsafe fn either_copyin<T: ?Sized>(
-        &self,
-        dst: &mut T,
-        src: VirtAddr,
-    ) -> Result<(), ()>;
+    unsafe fn either_copyin<T: ?Sized>(&self, dst: &mut T, src: VirtAddr) -> Result<(), ()>;
 }
 
 // lock must be held when uding these:
 #[derive(Clone, Copy, Debug)]
 pub struct ProcInner {
     pub state: ProcState, // Process state
-    pub chan: usize, // if non-zero, sleeping on chan
-    pub killed: bool, // if true, have been killed
-    pub xstate: i32, // Exit status to be returned to parent's wait
-    pub pid: PId, // Process ID
+    pub chan: usize,      // if non-zero, sleeping on chan
+    pub killed: bool,     // if true, have been killed
+    pub xstate: i32,      // Exit status to be returned to parent's wait
+    pub pid: PId,         // Process ID
 }
 
 // These are private to the process, so lock need not be held.
 pub struct ProcData {
-    pub kstack: usize, // Virtual address of kernel stack
-    pub sz: usize, // Size of process memory (bytes)
-    pub uvm: Option<Box<Uvm>>, // User Memory Page Tabel
+    pub kstack: usize,                         // Virtual address of kernel stack
+    pub sz: usize,                             // Size of process memory (bytes)
+    pub uvm: Option<Box<Uvm>>,                 // User Memory Page Tabel
     pub trapframe: Option<NonNull<Trapframe>>, // data page for trampline.rs
-    pub context: Context, // swtch() here to run process
-    pub name: String, // Process name (debuggig)
-    pub ofile: [Option<File>; NOFILE], // Open files
-    pub cwd: Option<Inode>, // Current directory
+    pub context: Context,                      // swtch() here to run process
+    pub name: String,                          // Process name (debuggig)
+    pub ofile: [Option<File>; NOFILE],         // Open files
+    pub cwd: Option<Inode>,                    // Current directory
 }
 unsafe impl Sync for ProcData {}
 unsafe impl Send for ProcData {}
@@ -703,13 +703,14 @@ impl Process for Arc<Proc> {
                         if np_guard.state == ProcState::ZOMBIE {
                             // Found one
                             pid = np_guard.pid.0;
-                            if unsafe { np_data
-                                .uvm
-                                .as_mut()
-                                .unwrap()
-                                .copyout(addr, &np_guard.xstate)
-                                .is_err() }
-                            {
+                            if unsafe {
+                                np_data
+                                    .uvm
+                                    .as_mut()
+                                    .unwrap()
+                                    .copyout(addr, &np_guard.xstate)
+                                    .is_err()
+                            } {
                                 Mutex::unlock(np_guard);
                                 Mutex::unlock(wait_guard);
                                 return None;
@@ -749,7 +750,7 @@ unsafe impl CopyInOut for Arc<Proc> {
                 uvm.copyout(addr.into(), src)
             }
             VirtAddr::Kernel(addr) => {
-                let src = as_bytes(src); 
+                let src = as_bytes(src);
                 let len = src.len();
                 let dst = core::slice::from_raw_parts_mut(addr as *mut u8, len);
                 dst.copy_from_slice(src);
@@ -757,11 +758,7 @@ unsafe impl CopyInOut for Arc<Proc> {
             }
         }
     }
-    unsafe fn either_copyin<T: ?Sized>(
-        &self,
-        dst: &mut T,
-        src: VirtAddr,
-    ) -> Result<(), ()> {
+    unsafe fn either_copyin<T: ?Sized>(&self, dst: &mut T, src: VirtAddr) -> Result<(), ()> {
         match src {
             VirtAddr::User(addr) => {
                 let uvm = (&mut *self.data.get()).uvm.as_mut().unwrap();

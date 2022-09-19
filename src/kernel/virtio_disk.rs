@@ -76,7 +76,6 @@ mod virtio_status {
     pub(crate) const FEATURES_OK: u32 = 0b1000;
 }
 
-
 // Device feature bits
 mod virtio_features {
     // Disk is read-only

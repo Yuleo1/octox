@@ -43,6 +43,7 @@ pub mod printf;
 pub mod bio;
 #[cfg(target_os = "none")]
 pub mod buddy;
+pub mod defs;
 #[cfg(target_os = "none")]
 pub mod fcntl;
 #[cfg(target_os = "none")]
@@ -68,6 +69,8 @@ pub mod swtch;
 #[cfg(target_os = "none")]
 pub mod sync;
 #[cfg(target_os = "none")]
+pub mod syscall;
+#[cfg(target_os = "none")]
 pub mod sysfile;
 #[cfg(target_os = "none")]
 pub mod trampoline;
@@ -77,9 +80,6 @@ pub mod trap;
 pub mod virtio_disk;
 #[cfg(target_os = "none")]
 pub mod vm;
-#[cfg(target_os = "none")]
-pub mod syscall;
-pub mod defs;
 
 #[macro_export]
 macro_rules! kmain {

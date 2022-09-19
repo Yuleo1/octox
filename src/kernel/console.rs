@@ -75,9 +75,10 @@ impl Device<UVAddr> for Mutex<Cons> {
                 break;
             }
             // copy the input byte to the user-space buffer.
-            if unsafe { p.either_copyout(From::from(Self::to_va(as_bytes(cdst))), &c)
-                .is_err() }
-            {
+            if unsafe {
+                p.either_copyout(From::from(Self::to_va(as_bytes(cdst))), &c)
+                    .is_err()
+            } {
                 break;
             }
             size = n;
@@ -98,9 +99,10 @@ impl Device<UVAddr> for Mutex<Cons> {
         let mut c = 0;
         for (n, csrc) in src.iter().enumerate() {
             let p = CPUS.my_proc().unwrap();
-            if unsafe { p.either_copyin(&mut c, From::from(Self::to_va(as_bytes(csrc))))
-                .is_err() }
-            {
+            if unsafe {
+                p.either_copyin(&mut c, From::from(Self::to_va(as_bytes(csrc))))
+                    .is_err()
+            } {
                 return Some(n);
             }
             putc(c);

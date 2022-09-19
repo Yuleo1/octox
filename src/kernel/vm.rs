@@ -2,7 +2,7 @@ use crate::defs::{as_bytes, as_bytes_mut};
 use crate::lazy::SyncOnceCell;
 use crate::memlayout::{KERNBASE, PHYSTOP, PLIC, TRAMPOLINE, TRAPFLAME, UART0, VIRTIO0};
 use crate::proc::PROCS;
-use crate::riscv::{registers::satp, pgroundup, PGSHIFT, PGSIZE, pteflags::*, sfence_vma};
+use crate::riscv::{pgroundup, pteflags::*, registers::satp, sfence_vma, PGSHIFT, PGSIZE};
 use alloc::boxed::Box;
 use core::cmp::{Ord, PartialEq, PartialOrd};
 use core::convert::From;
@@ -336,7 +336,6 @@ impl<V: VAddr> PageTable<V> {
         size: usize,
         perm: usize,
     ) -> Result<(), ()> {
-
         if size == 0 {
             panic!("mappages: size");
         }
@@ -440,8 +439,13 @@ impl Uvm {
             panic!("inituvm: more than a page");
         }
         let mem = Box::into_raw(Box::<Page>::new_zeroed().assume_init());
-        self.mappages(0.into(), (mem as usize).into(), PGSIZE, PTE_W | PTE_R | PTE_X | PTE_U)
-            .unwrap();
+        self.mappages(
+            0.into(),
+            (mem as usize).into(),
+            PGSIZE,
+            PTE_W | PTE_R | PTE_X | PTE_U,
+        )
+        .unwrap();
         ptr::copy_nonoverlapping(src.as_ptr(), mem as *mut u8, src.len());
     }
 
@@ -462,7 +466,12 @@ impl Uvm {
                 }
             };
             if self
-                .mappages(a.into(), (mem as usize).into(), PGSIZE, PTE_R | PTE_U | xperm)
+                .mappages(
+                    a.into(),
+                    (mem as usize).into(),
+                    PGSIZE,
+                    PTE_R | PTE_U | xperm,
+                )
                 .is_err()
             {
                 unsafe {
@@ -568,7 +577,8 @@ impl Uvm {
             va0.rounddown();
             let pa0 = self.page_table.walkaddr(va0).ok_or(())?;
             let n = core::cmp::min(PGSIZE - (dstva - va0), len);
-            let dst = core::slice::from_raw_parts_mut((pa0.into_usize() + (dstva - va0)) as *mut u8, n);
+            let dst =
+                core::slice::from_raw_parts_mut((pa0.into_usize() + (dstva - va0)) as *mut u8, n);
             dst.copy_from_slice(&src[offset..(offset + n)]);
             len -= n;
             offset += n;
@@ -582,11 +592,7 @@ impl Uvm {
     // Return Result<(), ()>
     // # safety:
     // T mem layout is fixed.
-    pub unsafe fn copyin<T: ?Sized>(
-        &mut self,
-        dst: &mut T,
-        mut srcva: UVAddr,
-    ) -> Result<(), ()> {
+    pub unsafe fn copyin<T: ?Sized>(&mut self, dst: &mut T, mut srcva: UVAddr) -> Result<(), ()> {
         let dst = unsafe { as_bytes_mut(dst) };
         let mut len = dst.len();
         let mut offset = 0;

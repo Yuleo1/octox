@@ -13,13 +13,13 @@
 //     so do not keep them longer than necessary.
 
 use crate::{
+    array,
     fs::BSIZE,
     param::NBUF,
     rwlock::RwLock,
     sleeplock::{SleepLock, SleepLockGuard},
     spinlock::Mutex,
     virtio_disk::DISK,
-    array,
 };
 use alloc::sync::{Arc, Weak};
 use core::ops::{Deref, DerefMut};

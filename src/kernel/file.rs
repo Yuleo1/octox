@@ -80,11 +80,14 @@ impl FTable {
             _ => unreachable!(),
         }));
 
-        Some((File {
-            f: f.clone(), // ref count = 2
-            readable: opts.get_access_mode().0,
-            writable: opts.get_access_mode().1,
-        }, ip_guard))
+        Some((
+            File {
+                f: f.clone(), // ref count = 2
+                readable: opts.get_access_mode().0,
+                writable: opts.get_access_mode().1,
+            },
+            ip_guard,
+        ))
     }
 }
 

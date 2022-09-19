@@ -1,9 +1,9 @@
 use crate::kernelvec::*;
 use crate::memlayout::*;
 use crate::param::NCPU;
+use crate::riscv::registers::{pmpcfg0::*, *};
 use core::arch::asm;
 use core::hint::unreachable_unchecked;
-use crate::riscv::registers::{*, pmpcfg0::*};
 
 #[repr(C, align(16))]
 struct Stack([u8; 4096 * 4 * NCPU]);

@@ -2,7 +2,10 @@ use crate::{
     memlayout::{TRAMPOLINE, TRAPFLAME, UART0_IRQ, VIRTIO0_IRQ},
     plic,
     proc::{Cpus, ProcState, Process, CPUS, PROCS},
-    riscv::{*, registers::{*, scause::*}},
+    riscv::{
+        registers::{scause::*, *},
+        *,
+    },
     spinlock::Mutex,
     trampoline::trampoline,
     uart::UART,

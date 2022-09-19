@@ -1,9 +1,9 @@
-use core::mem:: size_of_val;
-use alloc::sync::Arc;
 use crate::{
     proc::{Proc, ProcData, Trapframe, CPUS},
     vm::{Addr, UVAddr},
 };
+use alloc::sync::Arc;
+use core::mem::size_of_val;
 
 // System call numbers
 #[repr(usize)]
@@ -90,8 +90,7 @@ impl SysCalls<'_> {
     // # Safety:
     // T memlayout is fixed
     pub unsafe fn fetch_data<T: ?Sized>(&mut self, addr: UVAddr, buf: &mut T) -> Result<(), ()> {
-        if addr.into_usize() >= self.data.sz
-            || addr.into_usize() + size_of_val(buf) > self.data.sz
+        if addr.into_usize() >= self.data.sz || addr.into_usize() + size_of_val(buf) > self.data.sz
         {
             // both tests needed, in case of overflow
             return Err(());
@@ -105,7 +104,9 @@ impl SysCalls<'_> {
         unsafe {
             self.fetch_data(addr, buf)?;
         }
-        Ok(core::str::from_utf8_mut(buf).or(Err(()))?.trim_matches(char::from(0)))
+        Ok(core::str::from_utf8_mut(buf)
+            .or(Err(()))?
+            .trim_matches(char::from(0)))
     }
 
     // Fetch the nth word-sized system call argument as a null-terminated string.
@@ -114,7 +115,7 @@ impl SysCalls<'_> {
     pub fn arg_str<'a>(&mut self, n: usize, buf: &'a mut [u8]) -> Result<&'a str, ()> {
         self.fetch_str(self.arg_addr(n), buf)
     }
-    
+
     fn call(&mut self) -> () {
         // Mapping syscall numbers to the function that handles the system call.
         if let Ok(res) = match SysCallNum::from_usize(self.tf.a7) {

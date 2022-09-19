@@ -1,4 +1,3 @@
-
 // RISC-V registers
 pub mod registers {
     // hart (core) id registers
@@ -53,7 +52,7 @@ pub mod registers {
                 _write(value);
             }
         }
-        
+
         #[inline]
         pub fn set_mie() {
             unsafe {
@@ -84,19 +83,19 @@ pub mod registers {
         const SPP: usize = 1 << 8; // Previous mode, 1=Supervisor, 0=user
         const SPIE: usize = 1 << 5; // Supervisor Previous Interrupt Enable
         const SIE: usize = 1 << 1; // Supervisor Interrupt Enable
-        
+
         #[derive(Clone, Copy, Debug)]
         pub struct Sstatus {
             bits: usize,
         }
-    
+
         impl Sstatus {
             // Supervisor Interrupt Enable
             #[inline]
             pub(in crate::riscv) fn sie(&self) -> bool {
                 self.bits & SIE != 0
             }
-    
+
             // Supervisor Previous Privilege mode
             #[inline]
             pub fn spp(&self) -> SPP {
@@ -105,7 +104,7 @@ pub mod registers {
                     _ => SPP::Supervisor,
                 }
             }
-    
+
             // restore status bits
             #[inline]
             pub fn restore(&self) {
@@ -182,7 +181,7 @@ pub mod registers {
             asm!("csrc sip, {}", in(reg) SSIP);
         }
     }
-    
+
     // Supervisor Interrupt Enable
     pub mod sie {
         use core::arch::asm;
@@ -205,7 +204,7 @@ pub mod registers {
         pub unsafe fn set_stimer() {
             _set(STIE);
         }
-        
+
         #[inline]
         pub unsafe fn set_ssoft() {
             _set(SSIE);
@@ -269,8 +268,8 @@ pub mod registers {
     // Supervisor Trap-Vector Base Address
     // low two bits are mode.
     pub mod stvec {
-        use core::arch::asm;
         pub use super::mtvec::TrapMode;
+        use core::arch::asm;
 
         #[inline]
         pub unsafe fn write(addr: usize, mode: TrapMode) {
@@ -361,7 +360,7 @@ pub mod registers {
         // stap register
         #[derive(Clone, Copy, Debug)]
         pub struct Satp {
-            bits: usize
+            bits: usize,
         }
 
         // 64-bit satp mode
@@ -422,12 +421,12 @@ pub mod registers {
 
     // Supervisor Trap Cause
     pub mod scause {
-        use core::{mem::size_of, arch::asm};
+        use core::{arch::asm, mem::size_of};
 
         // scause register
         #[derive(Clone, Copy)]
         pub struct Scause {
-            bits: usize
+            bits: usize,
         }
 
         // Trap Cause
@@ -555,9 +554,7 @@ pub mod registers {
         #[inline]
         pub fn read() -> usize {
             let bits: usize;
-            unsafe {
-                asm!("csrr {}, stval", out(reg) bits)
-            }
+            unsafe { asm!("csrr {}, stval", out(reg) bits) }
             bits
         }
     }

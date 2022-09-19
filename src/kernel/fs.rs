@@ -412,12 +412,12 @@ impl IData {
         while tot < n {
             let bp = BCACHE.read(self.dev, self.bmap((off / BSIZE) as u32)?);
             let m = core::cmp::min(n - tot, BSIZE - off % BSIZE);
-            if CPUS
-                .my_proc()
-                .unwrap()
-                .either_copyout(dst, &bp[(off % BSIZE)..m])
-                .is_err()
-            {
+            if unsafe {
+                CPUS.my_proc()
+                    .unwrap()
+                    .either_copyout(dst, &bp[(off % BSIZE)..m])
+                    .is_err()
+            } {
                 return Err("inode read: Failed to copyout");
             }
             tot += m;
