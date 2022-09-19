@@ -155,24 +155,26 @@ pub trait CopyInOut {
     ) -> Result<(), ()>;
 }
 
+// lock must be held when uding these:
 #[derive(Clone, Copy, Debug)]
 pub struct ProcInner {
-    pub state: ProcState,
-    pub chan: usize,
-    pub killed: bool,
-    pub xstate: i32,
-    pub pid: PId,
+    pub state: ProcState, // Process state
+    pub chan: usize, // if non-zero, sleeping on chan
+    pub killed: bool, // if true, have been killed
+    pub xstate: i32, // Exit status to be returned to parent's wait
+    pub pid: PId, // Process ID
 }
 
+// These are private to the process, so lock need not be held.
 pub struct ProcData {
-    pub kstack: usize,
-    pub sz: usize,
-    pub uvm: Option<Box<Uvm>>,
-    pub trapframe: Option<NonNull<Trapframe>>,
-    pub context: Context,
-    pub name: String,
-    pub ofile: [Option<File>; NOFILE],
-    pub cwd: Option<Inode>,
+    pub kstack: usize, // Virtual address of kernel stack
+    pub sz: usize, // Size of process memory (bytes)
+    pub uvm: Option<Box<Uvm>>, // User Memory Page Tabel
+    pub trapframe: Option<NonNull<Trapframe>>, // data page for trampline.rs
+    pub context: Context, // swtch() here to run process
+    pub name: String, // Process name (debuggig)
+    pub ofile: [Option<File>; NOFILE], // Open files
+    pub cwd: Option<Inode>, // Current directory
 }
 unsafe impl Sync for ProcData {}
 unsafe impl Send for ProcData {}
