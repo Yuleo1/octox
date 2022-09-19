@@ -1,10 +1,9 @@
-use core::mem::size_of;
-
+use core::mem:: size_of_val;
+use alloc::sync::Arc;
 use crate::{
     proc::{Proc, ProcData, Trapframe, CPUS},
     vm::{Addr, UVAddr},
 };
-use alloc::sync::Arc;
 
 // System call numbers
 #[repr(usize)]
@@ -83,40 +82,41 @@ impl SysCalls<'_> {
     // Retrieve an argument as a UVAddr.
     // Doesn't check legality, since
     // copyin/copyout will do that.
-    pub fn arg_addr(&self, arg: usize) -> UVAddr {
-        UVAddr::from(arg)
+    pub fn arg_addr(&self, n: usize) -> UVAddr {
+        UVAddr::from(self.arg(n))
     }
 
     // Fetch the data at addr from the current process.
-    // せっかくcopyinでZeroBytesクレートつかっているので、ここは境界指定して &mut T でいい
-    pub fn fetch_addr(&mut self, addr: UVAddr, buf: &mut [u8]) -> Result<(), ()> {
+    // # Safety:
+    // T memlayout is fixed
+    pub unsafe fn fetch_data<T: ?Sized>(&mut self, addr: UVAddr, buf: &mut T) -> Result<(), ()> {
         if addr.into_usize() >= self.data.sz
-            || addr.into_usize() + size_of::<usize>() > self.data.sz
+            || addr.into_usize() + size_of_val(buf) > self.data.sz
         {
             // both tests needed, in case of overflow
             return Err(());
         }
-
         self.data.uvm.as_mut().unwrap().copyin(buf, addr)
     }
 
-    // Fetch the nul-terminated string at addr from the current process.
+    // Fetch the str at addr from the current process.
     // Return length of string or error.
-    // 最初から cstr 使うようにしてもいいかもしれない。copyinstrのところからね。
-    pub fn fetch_str(&mut self, addr: UVAddr, buf: &mut [u8]) -> Result<usize, ()> {
-        if self.data.uvm.as_mut().unwrap().copyinstr(buf, addr).is_err() {
-            Err(())
-        } else {
-            Ok(buf.iter().position(|&c| c == b'\0').unwrap_or(buf.len()))
+    pub fn fetch_str<'a>(&mut self, addr: UVAddr, buf: &'a mut [u8]) -> Result<&'a str, ()> {
+        unsafe {
+            self.fetch_data(addr, buf)?;
         }
+        Ok(core::str::from_utf8_mut(buf).or(Err(()))?.trim_matches(char::from(0)))
     }
 
     // Fetch the nth word-sized system call argument as a null-terminated string.
     // Copies into buf.
     // Return string length if OK (including nul), or Err
-    // pub fn arg_str(&mut self, )
+    pub fn arg_str<'a>(&mut self, n: usize, buf: &'a mut [u8]) -> Result<&'a str, ()> {
+        self.fetch_str(self.arg_addr(n), buf)
+    }
     
     fn call(&mut self) -> () {
+        // Mapping syscall numbers to the function that handles the system call.
         if let Ok(res) = match SysCallNum::from_usize(self.tf.a7) {
             Some(SysCallNum::SysFork) => todo!(),
             Some(SysCallNum::SysExit) => todo!(),
@@ -144,6 +144,7 @@ impl SysCalls<'_> {
                 Err(())
             }
         } {
+            // Store system call return value in p->trapframe->a0
             self.tf.a0 = res;
         } else {
             self.tf.a0 = -1 as isize as usize;

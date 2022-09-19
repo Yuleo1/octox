@@ -22,6 +22,7 @@ pub unsafe fn as_bytes_mut<T: ?Sized>(refs: &mut T) -> &mut [u8] {
     core::slice::from_raw_parts_mut(refs as *mut T as *mut u8, len)
 }
 
+
 // Array Macro for const variables
 pub use core::mem::{ManuallyDrop, MaybeUninit};
 

@@ -142,13 +142,13 @@ pub trait Process {
     fn yielding(&self);
 }
 
-pub trait CopyInOut {
+pub unsafe trait CopyInOut {
     // Copy to either a user address, or kernel address.
     // Return Result <(), ()
-    fn either_copyout<T: ?Sized>(&self, dst: VirtAddr, src: &T) -> Result<(), ()>;
+    unsafe fn either_copyout<T: ?Sized>(&self, dst: VirtAddr, src: &T) -> Result<(), ()>;
     // Copy from either a user address, or kernel address,
     // Return Result<(), ()>
-    fn either_copyin<T: ?Sized>(
+    unsafe fn either_copyin<T: ?Sized>(
         &self,
         dst: &mut T,
         src: VirtAddr,
@@ -703,12 +703,12 @@ impl Process for Arc<Proc> {
                         if np_guard.state == ProcState::ZOMBIE {
                             // Found one
                             pid = np_guard.pid.0;
-                            if np_data
+                            if unsafe { np_data
                                 .uvm
                                 .as_mut()
                                 .unwrap()
                                 .copyout(addr, &np_guard.xstate)
-                                .is_err()
+                                .is_err() }
                             {
                                 Mutex::unlock(np_guard);
                                 Mutex::unlock(wait_guard);
@@ -741,36 +741,36 @@ impl Process for Arc<Proc> {
     }
 }
 
-impl CopyInOut for Arc<Proc> {
-    fn either_copyout<T: ?Sized>(&self, dst: VirtAddr, src: &T) -> Result<(), ()> {
+unsafe impl CopyInOut for Arc<Proc> {
+    unsafe fn either_copyout<T: ?Sized>(&self, dst: VirtAddr, src: &T) -> Result<(), ()> {
         match dst {
             VirtAddr::User(addr) => {
-                let uvm = unsafe { (&mut *self.data.get()).uvm.as_mut().unwrap() };
+                let uvm = (&mut *self.data.get()).uvm.as_mut().unwrap();
                 uvm.copyout(addr.into(), src)
             }
             VirtAddr::Kernel(addr) => {
-                let src = unsafe { as_bytes(src) };
+                let src = as_bytes(src); 
                 let len = src.len();
-                let dst = unsafe { core::slice::from_raw_parts_mut(addr as *mut u8, len) };
+                let dst = core::slice::from_raw_parts_mut(addr as *mut u8, len);
                 dst.copy_from_slice(src);
                 Ok(())
             }
         }
     }
-    fn either_copyin<T: ?Sized>(
+    unsafe fn either_copyin<T: ?Sized>(
         &self,
         dst: &mut T,
         src: VirtAddr,
     ) -> Result<(), ()> {
         match src {
             VirtAddr::User(addr) => {
-                let uvm = unsafe { (&mut *self.data.get()).uvm.as_mut().unwrap() };
+                let uvm = (&mut *self.data.get()).uvm.as_mut().unwrap();
                 uvm.copyin(dst, addr.into())
             }
             VirtAddr::Kernel(addr) => {
-                let dst = unsafe { as_bytes_mut(dst) };
+                let dst = as_bytes_mut(dst);
                 let len = dst.len();
-                let src = unsafe { core::slice::from_raw_parts(addr as *const u8, len) };
+                let src = core::slice::from_raw_parts(addr as *const u8, len);
                 dst.copy_from_slice(src);
                 Ok(())
             }

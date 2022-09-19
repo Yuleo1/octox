@@ -447,12 +447,12 @@ impl IData {
         while tot < n {
             let mut bp = BCACHE.read(self.dev, self.bmap((off / BSIZE) as u32)?);
             let m = core::cmp::min(n - tot, BSIZE - off % BSIZE);
-            if CPUS
-                .my_proc()
-                .unwrap()
-                .either_copyin(&mut bp[(off % BSIZE)..m], src)
-                .is_err()
-            {
+            if unsafe {
+                CPUS.my_proc()
+                    .unwrap()
+                    .either_copyin(&mut bp[(off % BSIZE)..m], src)
+                    .is_err()
+            } {
                 return Err("inode write: Failed to copyin");
             }
             tot += m;

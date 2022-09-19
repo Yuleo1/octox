@@ -557,10 +557,10 @@ impl Uvm {
     // Copy from kernel to user.
     // Copy bytes from src to virtual address dstva in a given page table.
     // Return Result<(), ()>
-    pub fn copyout<T: ?Sized>(&mut self, mut dstva: UVAddr, src: &T) -> Result<(), ()> {
-        let src = unsafe {
-            as_bytes(src)
-        };
+    // # Safety
+    // T mem layout is fixed
+    pub unsafe fn copyout<T: ?Sized>(&mut self, mut dstva: UVAddr, src: &T) -> Result<(), ()> {
+        let src = unsafe { as_bytes(src) };
         let mut len = src.len();
         let mut offset = 0;
         while len > 0 {
@@ -568,9 +568,7 @@ impl Uvm {
             va0.rounddown();
             let pa0 = self.page_table.walkaddr(va0).ok_or(())?;
             let n = core::cmp::min(PGSIZE - (dstva - va0), len);
-            let dst = unsafe {
-                core::slice::from_raw_parts_mut((pa0.into_usize() + (dstva - va0)) as *mut u8, n)
-            };
+            let dst = core::slice::from_raw_parts_mut((pa0.into_usize() + (dstva - va0)) as *mut u8, n);
             dst.copy_from_slice(&src[offset..(offset + n)]);
             len -= n;
             offset += n;
@@ -582,14 +580,14 @@ impl Uvm {
     // Copy from user to kernel.
     // Copy len bytes to dst from virtual address srcva in a given page table.
     // Return Result<(), ()>
-    pub fn copyin<T: ?Sized>(
+    // # safety:
+    // T mem layout is fixed.
+    pub unsafe fn copyin<T: ?Sized>(
         &mut self,
         dst: &mut T,
         mut srcva: UVAddr,
     ) -> Result<(), ()> {
-        let dst = unsafe {
-            as_bytes_mut(dst)
-        };
+        let dst = unsafe { as_bytes_mut(dst) };
         let mut len = dst.len();
         let mut offset = 0;
         while len > 0 {
@@ -597,9 +595,7 @@ impl Uvm {
             va0.rounddown();
             let pa0 = self.page_table.walkaddr(va0.into()).ok_or(())?;
             let n = core::cmp::min(PGSIZE - (srcva - va0), len);
-            let src = unsafe {
-                core::slice::from_raw_parts((pa0.into_usize() + (srcva - va0)) as *mut u8, n)
-            };
+            let src = core::slice::from_raw_parts((pa0.into_usize() + (srcva - va0)) as *mut u8, n);
             dst[offset..(offset + n)].copy_from_slice(src);
             len -= n;
             offset += n;
