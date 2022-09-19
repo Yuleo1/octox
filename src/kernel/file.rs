@@ -34,7 +34,6 @@ pub enum VFile {
     Pipe,
 }
 
-
 // Device functions, map this trait using dyn
 #[cfg(target_os = "none")]
 pub trait Device<V: VAddr>: Send + Sync {

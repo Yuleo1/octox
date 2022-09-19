@@ -62,7 +62,7 @@ impl SysCallNum {
 
 pub struct SysCalls<'a> {
     pub proc: &'a Arc<Proc>,
-    data: &'a mut ProcData,
+    pub data: &'a mut ProcData,
     tf: &'a mut Trapframe,
 }
 
@@ -128,7 +128,7 @@ impl SysCalls<'_> {
             Some(SysCallNum::SysExec) => todo!(),
             Some(SysCallNum::SysFstat) => todo!(),
             Some(SysCallNum::SysChdir) => todo!(),
-            Some(SysCallNum::SysDup) => todo!(),
+            Some(SysCallNum::SysDup) => self.dup(),
             Some(SysCallNum::SysGetpid) => todo!(),
             Some(SysCallNum::SysSbrk) => todo!(),
             Some(SysCallNum::SysSleep) => todo!(),
