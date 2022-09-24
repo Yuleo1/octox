@@ -1,5 +1,6 @@
 #[cfg(target_os = "none")]
 use crate::bio::BCACHE;
+use crate::file::Major;
 #[cfg(target_os = "none")]
 use crate::log::LOG;
 use crate::param::{NINODE, ROOTDEV};
@@ -17,7 +18,6 @@ use crate::{
 };
 use alloc::sync::Arc;
 use core::ops::Deref;
-use crate::file::Major;
 
 // File system implementation. Five layers:
 //   - Blocks: allocator for raw disk blocks.
@@ -465,7 +465,7 @@ impl IData {
 
     // Look for a directory entry in a directory.
     // If found, set *poff to byte offset of entry.
-    pub fn dirlookup(&mut self, name: &[u8], poff: Option<&mut usize>) -> Option<Inode> {
+    pub fn dirlookup(&mut self, name: &str, poff: Option<&mut usize>) -> Option<Inode> {
         use core::mem::size_of;
 
         let mut de: DirEnt = Default::default();
@@ -483,7 +483,7 @@ impl IData {
             if de.inum == 0 {
                 continue;
             }
-            if name.eq(&de.name) {
+            if name == core::str::from_utf8(&de.name).unwrap().trim_matches(char::from(0)) {
                 // entry matches path element
                 if let Some(poff) = poff {
                     *poff = off as usize;
@@ -495,7 +495,7 @@ impl IData {
     }
 
     // Write a new directory entry (name, inum) into the directory dp.
-    pub fn dirlink(&mut self, name: &[u8], inum: u32) -> Result<(), &'static str> {
+    pub fn dirlink(&mut self, name: &str, inum: u32) -> Result<(), &'static str> {
         use core::mem::size_of;
 
         let mut de: DirEnt = Default::default();
@@ -520,7 +520,7 @@ impl IData {
             }
         }
 
-        de.name.copy_from_slice(&name[0..DIRSIZ]);
+        de.name.copy_from_slice(&name.as_bytes()[0..DIRSIZ]);
         de.inum = inum as u16;
         self.write(
             VirtAddr::Kernel(&mut de as *mut _ as usize),
@@ -711,105 +711,96 @@ impl ITable {
 }
 
 // Paths
-
-// Copy the next path element from path into name.
-// Return a slice to the element following the copied one.
-// The returned path has no leading slashes,
-// so the caller can check *path=='\0' to see if the name is the last one.
-// if no name to remove, return None.
-//
-// Examples:
-//   skipelem("a/bb/c", name) = "bb/c", setting name = "a"
-//   skipelem("///a//bb", name) = "bb", setting name = "a"
-//   skipelem("a", name) = "", setting name = "a"
-//   skipelem("", name) = skipelem("////", name) = 0
-//
+// A slice of a path (akin to str)
 #[cfg(target_os = "none")]
-fn skipelem<'a, 'b>(path: &'a [u8], name: &'b mut [u8]) -> Option<&'a [u8]> {
-    let mut i = 0;
+#[repr(transparent)]
+pub struct Path {
+    inner: str,
+}
 
-    while let Some(b'/') = path.get(i) {
-        i += 1;
+#[cfg(target_os = "none")]
+impl AsRef<Path> for str {
+    fn as_ref(&self) -> &Path {
+        Path::new(self)
+    }
+}
+
+#[cfg(target_os = "none")]
+impl Path {
+    pub fn new<S: AsRef<str> + ?Sized>(s: &S) -> &Path {
+        unsafe { &*(s.as_ref() as *const str as *const Path) }
     }
 
-    if let Some(0) = path.get(i) {
-        return None;
-    }
-
-    let s = i;
-    while let Some(c) = path.get(i) {
-        match c {
-            b'/' | 0 => break,
-            _ => i += 1,
+    // Get next path element from path as name &str,
+    // the element following the name as &Path
+    //
+    // Examples:
+    //   skip_elem("a/bb/c") = (Some("a"), Some("bb/c")),
+    //   skip_elem("///a//bb") = (Some("a"), Some("/bb")),
+    //   skipelem("a") = (Some("a"), None)
+    //   skipelem("") = skipelem("////") = (None, None)
+    //   if name: &str > DIRSIZE return (None, None)
+    pub fn skip_elem(&self) -> (Option<&str>, Option<&Path>) {
+        match self.inner.trim_matches('/').split_once('/') {
+            Some((name, path)) if name.len() <= DIRSIZ => (Some(name), Some(Path::new(path))),
+            None if 0 < self.inner.len() && self.inner.len() < DIRSIZ => (Some(&self.inner), None),
+            _ => (None, None),
         }
     }
 
-    let len = i - s;
-    if len >= DIRSIZ {
-        name[..DIRSIZ].copy_from_slice(&path[s..DIRSIZ]);
-    } else {
-        name[..len].copy_from_slice(&path[s..len]);
-        name[len..].fill(0);
-    }
+    // Look up and return the inode for a path name.
+    // If `parent` is true, return the inode for the parent.
+    // Must be called inside a transaction since it calls ITABLE.put(
+    // when dropping an inode.
+    // # Safety:
+    // call inside a transaction.
+    pub unsafe fn namex(path: &Path, parent: bool) -> Option<Inode> {
+        let mut ip = match path.inner.get(0..1) {
+            Some("/") => ITABLE.get(ROOTDEV, ROOTINO),
+            _ => unsafe { &(*CPUS.my_proc().unwrap().data.get()) }
+                .cwd
+                .as_ref()
+                .unwrap()
+                .dup(),
+        };
 
-    while let Some(b'/') = path.get(i) {
-        i += 1;
-    }
-
-    Some(&path[i..])
-}
-
-// Look up and return the inode for a path name.
-// If parent != None, return the inode for the parent and copy the final
-// path element into name, which must have room for DIRSIZ bytes.
-// Must be called inside a transaction since it calls iput().
-#[cfg(target_os = "none")]
-pub fn namex(path: &[u8], nameiparent: bool, name: &mut [u8]) -> Option<Inode> {
-    let mut ip;
-    if let Some(&b'/') = path.first() {
-        ip = ITABLE.get(ROOTDEV, ROOTINO);
-    } else {
-        ip = unsafe { &(*CPUS.my_proc().unwrap().data.get()) }
-            .cwd
-            .as_ref()
-            .unwrap()
-            .dup();
-    }
-    loop {
-        match skipelem(path, name) {
-            Some(path) => {
-                let mut guard = ip.lock();
-                if guard.itype != IType::Dir {
-                    return None;
-                }
-                if nameiparent && path[0] == b'\0' {
-                    // Stop one level early.
-                    SleepLock::unlock(guard);
-                    return Some(ip);
-                }
-                if let Some(next) = guard.dirlookup(name, Some(&mut 0)) {
-                    SleepLock::unlock(guard);
-                    ip = next;
-                } else {
-                    return None;
-                }
+        let mut path = path;
+        loop {
+            let mut guard = ip.lock();
+            if guard.itype != IType::Dir {
+                return None;
             }
-            _ => break,
+            match path.skip_elem() {
+                (Some(name), Some(npath)) => {
+                    if let Some(nip) = guard.dirlookup(name, None) {
+                        SleepLock::unlock(guard);
+                        ip = nip;
+                        path = npath;
+                        continue;
+                    }
+                    break None;
+                }, 
+                (Some(name), None) if !parent => {
+                    if let Some(ip) = guard.dirlookup(name, None) {
+                        SleepLock::unlock(guard);
+                        break Some(ip);
+                    }
+                    break None;
+                },
+                (Some(_), None) => {
+                    SleepLock::unlock(guard);
+                    break Some(ip);
+                },
+                _ => break None,
+            }
         }
     }
-    if nameiparent {
-        return None;
+
+    pub unsafe fn namei(&mut self) -> Option<Inode> {
+        Self::namex(self, false)
     }
-    Some(ip)
-}
 
-#[cfg(target_os = "none")]
-pub fn namei(path: &[u8]) -> Option<Inode> {
-    let mut name = [0u8; DIRSIZ];
-    namex(path, false, &mut name)
-}
-
-#[cfg(target_os = "none")]
-pub fn nameiparent(path: &[u8], name: &mut [u8]) -> Option<Inode> {
-    namex(path, true, name)
+    pub unsafe fn nameiparent(&mut self) -> Option<Inode> {
+        Self::namex(self, true)
+    }
 }

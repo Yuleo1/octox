@@ -47,7 +47,7 @@ impl Device<UVAddr> for Mutex<Cons> {
     // user read()s from the console go here.
     // copy (up to) a whole input line to dst.
     //
-    fn read(&self, dst: &mut [u8]) -> Option<usize> {
+    fn read(&self, dst: &mut [u8]) -> Result<usize, ()> {
         let mut cons_guard = self.lock();
         let mut c;
         let p = CPUS.my_proc().unwrap();
@@ -57,7 +57,7 @@ impl Device<UVAddr> for Mutex<Cons> {
             // input into CONS.buf.
             while cons_guard.r == cons_guard.w {
                 if p.inner.lock().killed {
-                    return None;
+                    return Err(());
                 }
                 cons_guard = p.sleep(&cons_guard.r as *const _ as usize, cons_guard);
             }
@@ -88,13 +88,13 @@ impl Device<UVAddr> for Mutex<Cons> {
                 break;
             }
         }
-        Some(size)
+        Ok(size)
     }
 
     //
     // user write()s to the console go here.
     //
-    fn write(&self, src: &[u8]) -> Option<usize> {
+    fn write(&self, src: &[u8]) -> Result<usize, ()> {
         let mut c = 0;
         for (n, csrc) in src.iter().enumerate() {
             let p = CPUS.my_proc().unwrap();
@@ -102,11 +102,11 @@ impl Device<UVAddr> for Mutex<Cons> {
                 p.either_copyin(&mut c, From::from(Self::to_va(as_bytes(csrc))))
                     .is_err()
             } {
-                return Some(n);
+                return Ok(n);
             }
             putc(c);
         }
-        Some(src.len())
+        Ok(src.len())
     }
 
     fn major(&self) -> Major {

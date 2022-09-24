@@ -1,6 +1,6 @@
 #[cfg(target_os = "none")]
 use crate::{
-    fcntl::OpenOptions,
+    fcntl::OMode,
     fs::{IData, Inode},
     lazy::{SyncLazy, SyncOnceCell},
     param::{NDEV, NFILE},
@@ -20,12 +20,7 @@ pub static DEVSW: DevSW = DevSW::new();
 pub static FTABLE: SyncLazy<Mutex<[Option<Arc<VFile>>; NFILE]>> = SyncLazy::new(|| todo!());
 
 #[cfg(target_os = "none")]
-#[derive(Default, Clone)]
-pub struct File {
-    f: Option<Arc<VFile>>,
-    readable: bool,
-    writable: bool,
-}
+type FTable = Mutex<[Option<Arc<VFile>>; NFILE]>;
 
 #[cfg(target_os = "none")]
 pub enum VFile {
@@ -37,8 +32,8 @@ pub enum VFile {
 // Device functions, map this trait using dyn
 #[cfg(target_os = "none")]
 pub trait Device<V: VAddr>: Send + Sync {
-    fn read(&self, dst: &mut [u8]) -> Option<usize>;
-    fn write(&self, src: &[u8]) -> Option<usize>;
+    fn read(&self, dst: &mut [u8]) -> Result<usize, ()>;
+    fn write(&self, src: &[u8]) -> Result<usize, ()>;
     fn to_va(reference: &[u8]) -> V
     where
         Self: Sized,
@@ -55,6 +50,7 @@ impl core::fmt::Debug for dyn Device<UVAddr> {
     }
 }
 
+
 #[cfg(target_os = "none")]
 pub struct FsFile<V: VAddr> {
     off: UnsafeCell<u32>,
@@ -63,7 +59,64 @@ pub struct FsFile<V: VAddr> {
 }
 
 #[cfg(target_os = "none")]
-type FTable = Mutex<[Option<Arc<VFile>>; NFILE]>;
+#[derive(Default, Clone)]
+pub struct File {
+    f: Option<Arc<VFile>>,
+    readable: bool,
+    writable: bool,
+}
+
+//impl File {
+//    pub fn read(&self) -> Result<usize, ()> {
+//        if let Some(ref f) = self.f {
+//            match f {
+//               Arc<VFile:: 
+//            }
+//            Ok(1)
+//        } else {
+//            Err(())
+//        }
+//    }
+//}
+
+impl VFile {
+    fn read(&self, dst: &mut [u8]) -> Result<usize, ()> {
+        match self {
+            VFile::Device(d) => d.read(dst),
+            VFile::FsFile(f) => f.read(dst),
+            _ => Err(())
+        }
+    }
+}
+
+#[cfg(target_os = "none")]
+impl FsFile<UVAddr> {
+    pub fn new(ip: Inode) -> Self {
+        Self {
+            off: UnsafeCell::new(0),
+            ip,
+            _maker: PhantomData,
+        }
+    }
+    pub fn read(&self, dst: &mut [u8]) -> Result<usize, ()> {
+        let mut ip = self.ip.lock();
+        let off = unsafe { *self.off.get() };
+        match ip.read(From::from(Self::to_va(dst)), off, dst.len()) {
+            // inode lock is held
+            Ok(r) => {
+                unsafe {
+                    *self.off.get() += r as u32;
+                }
+                Ok(r)
+            }
+            Err(_) => Err(()),
+        }
+    }
+    fn to_va(reference: &[u8]) -> UVAddr {
+        UVAddr::from(reference.as_ptr() as usize)
+    }
+}
+
 
 #[cfg(target_os = "none")]
 impl FTable {
@@ -72,7 +125,7 @@ impl FTable {
         &'a self,
         ip: Inode,
         ip_guard: SleepLockGuard<'a, IData>,
-        opts: &OpenOptions,
+        opts: OMode,
     ) -> Option<(File, SleepLockGuard<IData>)> {
         let mut guard = self.lock();
 
@@ -97,39 +150,11 @@ impl FTable {
         Some((
             File {
                 f: f.clone(), // ref count = 2
-                readable: opts.get_access_mode().0,
-                writable: opts.get_access_mode().1,
+                readable: opts.is_readable(),
+                writable: opts.is_writable(),
             },
             ip_guard,
         ))
-    }
-}
-
-#[cfg(target_os = "none")]
-impl FsFile<UVAddr> {
-    pub fn new(ip: Inode) -> Self {
-        Self {
-            off: UnsafeCell::new(0),
-            ip,
-            _maker: PhantomData,
-        }
-    }
-    pub fn read(&self, dst: &mut [u8]) -> Option<usize> {
-        let mut ip = self.ip.lock();
-        let off = unsafe { *self.off.get() };
-        match ip.read(From::from(Self::to_va(dst)), off, dst.len()) {
-            // inode lock is held
-            Ok(r) => {
-                unsafe {
-                    *self.off.get() += r as u32;
-                }
-                Some(r)
-            }
-            Err(_) => None,
-        }
-    }
-    fn to_va(reference: &[u8]) -> UVAddr {
-        UVAddr::from(reference.as_ptr() as usize)
     }
 }
 

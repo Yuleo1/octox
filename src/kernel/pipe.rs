@@ -1,1 +1,3 @@
+struct Pipe {
 
+}

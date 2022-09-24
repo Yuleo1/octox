@@ -99,14 +99,14 @@ impl SysCalls<'_> {
     }
 
     // Fetch the str at addr from the current process.
-    // Return length of string or error.
+    // Return &str or error.
     pub fn fetch_str<'a>(&mut self, addr: UVAddr, buf: &'a mut [u8]) -> Result<&'a str, ()> {
         unsafe {
             self.fetch_data(addr, buf)?;
         }
         Ok(core::str::from_utf8_mut(buf)
             .or(Err(()))?
-            .trim_matches(char::from(0)))
+            .trim_end_matches(char::from(0)))
     }
 
     // Fetch the nth word-sized system call argument as a null-terminated string.
@@ -128,7 +128,7 @@ impl SysCalls<'_> {
             Some(SysCallNum::SysExec) => todo!(),
             Some(SysCallNum::SysFstat) => todo!(),
             Some(SysCallNum::SysChdir) => todo!(),
-            Some(SysCallNum::SysDup) => self.dup(),
+            Some(SysCallNum::SysDup) => self.sys_dup(),
             Some(SysCallNum::SysGetpid) => todo!(),
             Some(SysCallNum::SysSbrk) => todo!(),
             Some(SysCallNum::SysSleep) => todo!(),

@@ -1,43 +1,34 @@
-#[derive(Clone, Debug)]
-pub struct OpenOptions {
-    read: bool,
-    write: bool,
-    append: bool,
-    truncate: bool,
-    create: bool,
+pub enum OMode {
+    RDONLY = 0x000,
+    WRONLY = 0x001,
+    RDWR = 0x002,
+    CREATE = 0x200,
+    TRUNC = 0x400,
 }
 
-impl OpenOptions {
-    pub fn new() -> Self {
-        Self {
-            read: false,
-            write: false,
-            append: false,
-            truncate: false,
-            create: false,
+impl OMode {
+    pub fn from_usize(bits: usize) -> Option<Self> {
+        match bits {
+            0x000 => Some(Self::RDONLY),
+            0x001 => Some(Self::WRONLY),
+            0x002 => Some(Self::RDWR),
+            0x200 => Some(Self::CREATE),
+            0x400 => Some(Self::TRUNC),
+            _ => None,
         }
     }
-    pub fn read(&mut self, read: bool) -> &mut Self {
-        self.read = read;
-        self
+
+    pub fn is_readable(&self) -> bool {
+        match self {
+            &Self::RDONLY | &Self::RDWR => true,
+            _ => false,
+        }
     }
-    pub fn write(&mut self, write: bool) -> &mut Self {
-        self.write = write;
-        self
-    }
-    pub fn append(&mut self, append: bool) -> &mut Self {
-        self.append = append;
-        self
-    }
-    pub fn truncate(&mut self, truncate: bool) -> &mut Self {
-        self.truncate = truncate;
-        self
-    }
-    pub fn create(&mut self, create: bool) -> &mut Self {
-        self.create = create;
-        self
-    }
-    pub fn get_access_mode(&self) -> (bool, bool) {
-        (self.read, self.write)
+
+    pub fn is_writable(&self) -> bool {
+        match self {
+            &Self::WRONLY | &Self::RDWR => true,
+            _ => false,
+        }
     }
 }
