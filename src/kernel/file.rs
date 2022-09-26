@@ -1,18 +1,27 @@
 #[cfg(target_os = "none")]
-use crate::{
-    fcntl::OMode,
-    fs::{IData, Inode},
-    lazy::{SyncLazy, SyncOnceCell},
-    param::{NDEV, NFILE},
-    sleeplock::SleepLockGuard,
-    spinlock::Mutex,
-    stat::IType,
-    vm::{UVAddr, VAddr}, array,
-};
+use crate::array;
+#[cfg(target_os = "none")]
+use crate::fcntl::OMode;
+#[cfg(target_os = "none")]
+use crate::fs::{IData, Inode};
+#[cfg(target_os = "none")]
+use crate::lazy::{SyncLazy, SyncOnceCell};
+#[cfg(target_os = "none")]
+use crate::param::{NDEV, NFILE};
+#[cfg(target_os = "none")]
+use crate::pipe::Pipe;
+#[cfg(target_os = "none")]
+use crate::sleeplock::SleepLockGuard;
+#[cfg(target_os = "none")]
+use crate::spinlock::Mutex;
+#[cfg(target_os = "none")]
+use crate::stat::IType;
+#[cfg(target_os = "none")]
+use crate::vm::VirtAddr;
 #[cfg(target_os = "none")]
 use alloc::sync::Arc;
 #[cfg(target_os = "none")]
-use core::{cell::UnsafeCell, marker::PhantomData};
+use core::cell::UnsafeCell;
 
 #[cfg(target_os = "none")]
 pub static DEVSW: DevSW = DevSW::new();
@@ -24,38 +33,30 @@ type FTable = Mutex<[Option<Arc<VFile>>; NFILE]>;
 
 #[cfg(target_os = "none")]
 pub enum VFile {
-    Device(&'static dyn Device<UVAddr>),
-    FsFile(FsFile<UVAddr>),
-    Pipe,
+    Device(&'static dyn Device),
+    FsFile(FsFile),
+    Pipe(Pipe),
 }
 
 // Device functions, map this trait using dyn
 #[cfg(target_os = "none")]
-pub trait Device<V: VAddr>: Send + Sync {
-    fn read(&self, dst: &mut [u8]) -> Result<usize, ()>;
-    fn write(&self, src: &[u8]) -> Result<usize, ()>;
-    fn to_va(reference: &[u8]) -> V
-    where
-        Self: Sized,
-    {
-        V::from(reference.as_ptr() as usize)
-    }
+pub trait Device: Send + Sync {
+    fn read(&self, dst: VirtAddr, n: usize) -> Result<usize, ()>;
+    fn write(&self, src: VirtAddr, n: usize) -> Result<usize, ()>;
     fn major(&self) -> Major;
 }
 
 #[cfg(target_os = "none")]
-impl core::fmt::Debug for dyn Device<UVAddr> {
+impl core::fmt::Debug for dyn Device {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "Device fn {:?}", self.major())
     }
 }
 
-
 #[cfg(target_os = "none")]
-pub struct FsFile<V: VAddr> {
+pub struct FsFile {
     off: UnsafeCell<u32>,
     ip: Inode,
-    _maker: PhantomData<V>,
 }
 
 #[cfg(target_os = "none")]
@@ -70,7 +71,7 @@ pub struct File {
 //    pub fn read(&self) -> Result<usize, ()> {
 //        if let Some(ref f) = self.f {
 //            match f {
-//               Arc<VFile:: 
+//               Arc<VFile::
 //            }
 //            Ok(1)
 //        } else {
@@ -79,52 +80,64 @@ pub struct File {
 //    }
 //}
 
+impl File {
+    // Read from file.
+    pub fn read(&self, dst: VirtAddr, n: usize) -> Result<usize, ()> {
+        if !self.readable {
+            return Err(());
+        }
+        self.f.as_ref().unwrap().read(dst, n)
+    }
+
+    // Write to file f.
+    pub fn write(&self, src: VirtAddr, n: usize) -> Result<usize, ()> {
+        if !self.writable {
+            return Err(());
+        }
+        todo!()
+    }
+}
+
 impl VFile {
-    fn read(&self, dst: &mut [u8]) -> Result<usize, ()> {
+    fn read(&self, dst: VirtAddr, n: usize) -> Result<usize, ()> {
         match self {
-            VFile::Device(d) => d.read(dst),
-            VFile::FsFile(f) => f.read(dst),
-            _ => Err(())
+            VFile::Device(d) => d.read(dst, n),
+            VFile::FsFile(f) => f.read(dst, n),
+            _ => Err(()),
         }
     }
 }
 
 #[cfg(target_os = "none")]
-impl FsFile<UVAddr> {
+impl FsFile {
     pub fn new(ip: Inode) -> Self {
         Self {
             off: UnsafeCell::new(0),
             ip,
-            _maker: PhantomData,
         }
     }
-    pub fn read(&self, dst: &mut [u8]) -> Result<usize, ()> {
+    pub fn read(&self, dst: VirtAddr, n: usize) -> Result<usize, ()> {
         let mut ip = self.ip.lock();
-        let off = unsafe { *self.off.get() };
-        match ip.read(From::from(Self::to_va(dst)), off, dst.len()) {
+        let off = unsafe { &mut *self.off.get() };
+
+        match ip.read(dst, *off, n) {
             // inode lock is held
             Ok(r) => {
-                unsafe {
-                    *self.off.get() += r as u32;
-                }
+                *off += r as u32;
                 Ok(r)
             }
             Err(_) => Err(()),
         }
     }
-    fn to_va(reference: &[u8]) -> UVAddr {
-        UVAddr::from(reference.as_ptr() as usize)
-    }
 }
-
 
 #[cfg(target_os = "none")]
 impl FTable {
     // Allocate a file structure
-    pub fn alloc<'a>(
-        &'a self,
+    pub fn alloc<'b>(
+        &'b self,
         ip: Inode,
-        ip_guard: SleepLockGuard<'a, IData>,
+        ip_guard: SleepLockGuard<'b, IData>,
         opts: OMode,
     ) -> Option<(File, SleepLockGuard<IData>)> {
         let mut guard = self.lock();
@@ -160,7 +173,7 @@ impl FTable {
 
 #[cfg(target_os = "none")]
 pub struct DevSW {
-    table: [SyncOnceCell<&'static dyn Device<UVAddr>>; NDEV],
+    table: [SyncOnceCell<&'static dyn Device>; NDEV],
 }
 
 #[cfg(target_os = "none")]
@@ -168,12 +181,14 @@ impl core::fmt::Debug for DevSW {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "[")?;
         for (count, v) in self.table.iter().enumerate() {
-            if count != 0 { write!(f, ", ")?; }
+            if count != 0 {
+                write!(f, ", ")?;
+            }
             if let Some(&v) = v.get() {
                 write!(f, "{:?}", v)?;
             } else {
                 write!(f, "None")?;
-            } 
+            }
         }
         write!(f, "]")
     }
@@ -189,12 +204,12 @@ impl DevSW {
     pub fn set(
         &self,
         devnum: Major,
-        dev: &'static dyn Device<UVAddr>,
-    ) -> Result<(), &'static (dyn Device<UVAddr> + 'static)> {
+        dev: &'static dyn Device,
+    ) -> Result<(), &'static (dyn Device + 'static)> {
         self.table[devnum as usize].set(dev)
     }
 
-    pub fn get(&self, devnum: Major) -> Option<&'static dyn Device<UVAddr>> {
+    pub fn get(&self, devnum: Major) -> Option<&'static dyn Device> {
         match self.table[devnum as usize].get() {
             Some(&dev) => Some(dev),
             None => None,

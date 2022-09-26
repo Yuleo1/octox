@@ -483,7 +483,11 @@ impl IData {
             if de.inum == 0 {
                 continue;
             }
-            if name == core::str::from_utf8(&de.name).unwrap().trim_matches(char::from(0)) {
+            if name
+                == core::str::from_utf8(&de.name)
+                    .unwrap()
+                    .trim_matches(char::from(0))
+            {
                 // entry matches path element
                 if let Some(poff) = poff {
                     *poff = off as usize;
@@ -779,18 +783,18 @@ impl Path {
                         continue;
                     }
                     break None;
-                }, 
+                }
                 (Some(name), None) if !parent => {
                     if let Some(ip) = guard.dirlookup(name, None) {
                         SleepLock::unlock(guard);
                         break Some(ip);
                     }
                     break None;
-                },
+                }
                 (Some(_), None) => {
                     SleepLock::unlock(guard);
                     break Some(ip);
-                },
+                }
                 _ => break None,
             }
         }

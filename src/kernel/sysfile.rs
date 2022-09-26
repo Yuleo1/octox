@@ -1,5 +1,6 @@
 use crate::fcntl::OMode;
 use crate::file::File;
+use crate::fs::Path;
 use crate::log::LOG;
 use crate::param::MAXPATH;
 use crate::syscall::SysCalls;
@@ -31,7 +32,7 @@ impl SysCalls<'_> {
         None
     }
 
-    pub fn sys_dup(&mut self) -> Result<usize, ()>{
+    pub fn sys_dup(&mut self) -> Result<usize, ()> {
         if let Some((_, f)) = self.arg_fd(0) {
             self.fdalloc(f.clone()).ok_or(())
         } else {
@@ -42,37 +43,34 @@ impl SysCalls<'_> {
     pub fn sys_read(&mut self) -> Result<usize, ()> {
         let addr = self.arg_addr(1);
         let len = self.arg(2);
-        let f = self.arg_fd(0).ok_or(())?.1;
+
         if let Some((_, f)) = self.arg_fd(0) {
-            //f.read(addr, len)
-            Ok(0)
+            f.read(From::from(addr), len)
         } else {
             Err(())
         }
     }
 
-
     pub fn sys_open(&mut self) -> Result<usize, ()> {
-        let mut path =[0u8; MAXPATH];
+        let mut path = [0u8; MAXPATH];
         let omode = self.arg(1);
-        let path = self.arg_str(0, &mut path)?;
+        let path = Path::new(self.arg_str(0, &mut path)?);
 
         LOG.begin_op();
 
         match OMode::from_usize(omode) {
-           Some(OMode::CREATE) => {
-               todo!()
-           },
-           _ => {
-               //if let Some(_) = namei(path) {
-                   //todo!()
-               //} else {
-                 //  LOG.end_op();
-                   //return Err(());
-               //}
-           }
+            Some(OMode::CREATE) => {
+                todo!()
+            }
+            _ => {
+                //if let Some(_) = namei(path) {
+                //todo!()
+                //} else {
+                //  LOG.end_op();
+                //return Err(());
+                //}
+            }
         }
         Err(())
     }
-
 }

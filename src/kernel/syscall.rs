@@ -123,7 +123,7 @@ impl SysCalls<'_> {
             Some(SysCallNum::SysExit) => todo!(),
             Some(SysCallNum::SysWait) => todo!(),
             Some(SysCallNum::SysPipe) => todo!(),
-            Some(SysCallNum::SysRead) => todo!(),
+            Some(SysCallNum::SysRead) => self.sys_read(),
             Some(SysCallNum::SysKill) => todo!(),
             Some(SysCallNum::SysExec) => todo!(),
             Some(SysCallNum::SysFstat) => todo!(),

@@ -7,12 +7,11 @@
 //   control-d -- end of line
 //   control-p -- print process list
 
-use crate::defs::as_bytes;
-use crate::file::{Device, DEVSW, Major};
+use crate::file::{Device, Major, DEVSW};
 use crate::proc::{procdump, CopyInOut, Process, CPUS, PROCS};
 use crate::spinlock::Mutex;
 use crate::uart;
-use crate::vm::UVAddr;
+use crate::vm::VirtAddr;
 use core::num::Wrapping;
 
 pub static CONS: Mutex<Cons> = Mutex::new(Cons::new(), "cons");
@@ -24,9 +23,9 @@ const fn ctrl(x: u8) -> u8 {
     x - b'@'
 }
 
-const INPUT_BUF: usize = 128;
+const INPUT_BUF_SIZE: usize = 128;
 pub struct Cons {
-    buf: [u8; INPUT_BUF],
+    buf: [u8; INPUT_BUF_SIZE],
     r: Wrapping<usize>, // Read index
     w: Wrapping<usize>, // Write index
     e: Wrapping<usize>, // Edit index
@@ -35,52 +34,53 @@ pub struct Cons {
 impl Cons {
     const fn new() -> Cons {
         Cons {
-            buf: [0; INPUT_BUF],
+            buf: [0; INPUT_BUF_SIZE],
             r: Wrapping(0),
             w: Wrapping(0),
             e: Wrapping(0),
         }
     }
 }
-impl Device<UVAddr> for Mutex<Cons> {
+
+impl Device for Mutex<Cons> {
     //
     // user read()s from the console go here.
     // copy (up to) a whole input line to dst.
     //
-    fn read(&self, dst: &mut [u8]) -> Result<usize, ()> {
+    fn read(&self, mut dst: VirtAddr, mut n: usize) -> Result<usize, ()> {
         let mut cons_guard = self.lock();
-        let mut c;
         let p = CPUS.my_proc().unwrap();
-        let mut size = 0;
-        for (n, cdst) in (1..).zip(dst.iter_mut()) {
+
+        let target = n;
+        while n > 0 {
             // wait until interrupt handler has put some
-            // input into CONS.buf.
+            // input into CONS.buf
             while cons_guard.r == cons_guard.w {
                 if p.inner.lock().killed {
                     return Err(());
                 }
                 cons_guard = p.sleep(&cons_guard.r as *const _ as usize, cons_guard);
             }
-            c = cons_guard.buf[cons_guard.r.0 % INPUT_BUF];
+            let c = cons_guard.buf[cons_guard.r.0 % INPUT_BUF_SIZE];
             cons_guard.r += Wrapping(1);
 
             if c == ctrl(b'D') {
                 // end of line
-                if n > 0 {
-                    // Save ^D for next time, to make sure
+                if n < target {
+                    // Save ^D for nexst time, to make sure
                     // caller gets a 0-bytes result.
                     cons_guard.r -= Wrapping(1);
                 }
                 break;
             }
+
             // copy the input byte to the user-space buffer.
-            if unsafe {
-                p.either_copyout(From::from(Self::to_va(as_bytes(cdst))), &c)
-                    .is_err()
-            } {
+            if unsafe { p.either_copyout(dst, &c).is_err() } {
                 break;
             }
-            size = n;
+
+            dst += 1;
+            n -= 1;
 
             if c == b'\n' {
                 // a whole line has arrived, return to
@@ -88,25 +88,23 @@ impl Device<UVAddr> for Mutex<Cons> {
                 break;
             }
         }
-        Ok(size)
+
+        Ok(target - n)
     }
 
     //
     // user write()s to the console go here.
     //
-    fn write(&self, src: &[u8]) -> Result<usize, ()> {
-        let mut c = 0;
-        for (n, csrc) in src.iter().enumerate() {
+    fn write(&self, src: VirtAddr, n: usize) -> Result<usize, ()> {
+        for i in 0..n {
             let p = CPUS.my_proc().unwrap();
-            if unsafe {
-                p.either_copyin(&mut c, From::from(Self::to_va(as_bytes(csrc))))
-                    .is_err()
-            } {
-                return Ok(n);
+            let mut c = 0;
+            if unsafe { p.either_copyin(&mut c, src).is_err() } {
+                return Ok(i);
             }
-            putc(c);
+            putc(c)
         }
-        Ok(src.len())
+        Ok(n)
     }
 
     fn major(&self) -> Major {
@@ -129,7 +127,7 @@ impl Mutex<Cons> {
             // Kill line
             m if m == ctrl(b'U') => {
                 while cons_guard.e != cons_guard.w
-                    && cons_guard.buf[(cons_guard.e - Wrapping(1)).0 % INPUT_BUF] != b'\n'
+                    && cons_guard.buf[(cons_guard.e - Wrapping(1)).0 % INPUT_BUF_SIZE] != b'\n'
                 {
                     cons_guard.e -= Wrapping(1);
                     putc(ctrl(b'H'));
@@ -143,18 +141,20 @@ impl Mutex<Cons> {
                 }
             }
             _ => {
-                if c != 0 && (cons_guard.e - cons_guard.r).0 < INPUT_BUF {
+                if c != 0 && (cons_guard.e - cons_guard.r).0 < INPUT_BUF_SIZE {
                     let c = if c == b'\r' { b'\n' } else { c };
 
                     // echo back to the user
                     putc(c);
 
                     // store for consumption by CONS.read().
-                    let e_idx = cons_guard.e.0 % INPUT_BUF;
+                    let e_idx = cons_guard.e.0 % INPUT_BUF_SIZE;
                     cons_guard.buf[e_idx] = c;
                     cons_guard.e += Wrapping(1);
 
-                    if c == b'\n' || c == ctrl(b'D') || (cons_guard.e - cons_guard.r).0 == INPUT_BUF
+                    if c == b'\n'
+                        || c == ctrl(b'D')
+                        || (cons_guard.e - cons_guard.r).0 == INPUT_BUF_SIZE
                     {
                         // wake up CONS.read() if a whole line (or end of line)
                         // has arrived
