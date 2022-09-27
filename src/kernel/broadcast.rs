@@ -19,13 +19,14 @@ impl<T: Send> SyncSender<T> {
     }
 }
 
-pub struct Receiver<T> {
+#[derive(Clone)]
+pub struct SyncReceiver<T> {
     sem: Arc<Semaphore>,
     buf: Arc<Mutex<LinkedList<T>>>,
     cond: Arc<Condvar>,
 }
 
-impl<T> Receiver<T> {
+impl<T> SyncReceiver<T> {
     pub fn recv(&self) -> T {
         let mut buf = self.buf.lock();
         loop {
@@ -38,15 +39,15 @@ impl<T> Receiver<T> {
     }
 }
 
-pub fn sync_channel<T>(max: usize) -> (SyncSender<T>, Receiver<T>) {
+pub fn channel<T>(max: usize, name: &'static str) -> (SyncSender<T>, SyncReceiver<T>) {
     let sem = Arc::new(Semaphore::new(max));
-    let buf = Arc::new(Mutex::new(LinkedList::new(), "sync channel"));
+    let buf = Arc::new(Mutex::new(LinkedList::new(), name));
     let cond = Arc::new(Condvar::new());
     let tx = SyncSender {
         sem: Arc::clone(&sem),
         buf: Arc::clone(&buf),
         cond: Arc::clone(&cond),
     };
-    let rx = Receiver { sem, buf, cond };
+    let rx = SyncReceiver { sem, buf, cond };
     (tx, rx)
 }
