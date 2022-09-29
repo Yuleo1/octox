@@ -10,7 +10,7 @@
 extern crate alloc;
 
 #[cfg(target_os = "none")]
-pub mod channel;
+pub mod mpmc;
 #[cfg(target_os = "none")]
 pub mod condvar;
 #[cfg(target_os = "none")]

@@ -39,7 +39,7 @@ impl<T> SyncReceiver<T> {
     }
 }
 
-pub fn channel<T>(max: usize, name: &'static str) -> (SyncSender<T>, SyncReceiver<T>) {
+pub fn sync_channel<T>(max: usize, name: &'static str) -> (SyncSender<T>, SyncReceiver<T>) {
     let sem = Arc::new(Semaphore::new(max));
     let buf = Arc::new(Mutex::new(LinkedList::new(), name));
     let cond = Arc::new(Condvar::new());
