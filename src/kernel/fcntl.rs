@@ -1,34 +1,72 @@
-pub enum OMode {
-    RDONLY = 0x000,
-    WRONLY = 0x001,
-    RDWR = 0x002,
-    CREATE = 0x200,
-    TRUNC = 0x400,
+mod omode {
+    pub const _RDONLY: usize = 0x000;
+    pub const WRONLY: usize = 0x001;
+    pub const RDWR: usize = 0x002;
+    pub const CREATE: usize = 0x200;
+    pub const TRUNC: usize = 0x400;
+}
+
+pub struct OMode {
+    read: bool,
+    write: bool,
+    truncate: bool,
+    create: bool,
 }
 
 impl OMode {
-    pub fn from_usize(bits: usize) -> Option<Self> {
-        match bits {
-            0x000 => Some(Self::RDONLY),
-            0x001 => Some(Self::WRONLY),
-            0x002 => Some(Self::RDWR),
-            0x200 => Some(Self::CREATE),
-            0x400 => Some(Self::TRUNC),
-            _ => None,
+    pub fn new() -> Self {
+        Self {
+            read: false,
+            write: false,
+            truncate: false,
+            create: false,
         }
     }
 
-    pub fn is_readable(&self) -> bool {
-        match self {
-            &Self::RDONLY | &Self::RDWR => true,
-            _ => false,
-        }
+    fn read(&mut self, read: bool) -> &mut Self {
+        self.read = read;
+        self
+    }
+    fn write(&mut self, write: bool) -> &mut Self {
+        self.write = write;
+        self
+    }
+    fn truncate(&mut self, truncate: bool) -> &mut Self {
+        self.truncate = truncate;
+        self
+    }
+    fn create(&mut self, create: bool) -> &mut Self {
+        self.create = create;
+        self
     }
 
-    pub fn is_writable(&self) -> bool {
-        match self {
-            &Self::WRONLY | &Self::RDWR => true,
-            _ => false,
-        }
+    pub fn from_usize(bits: usize) -> Self {
+        let mut mode = Self::new();
+        mode.read(true)
+            .read(bits & omode::WRONLY == 0)
+            .write(bits & omode::WRONLY != 0 || bits & omode::RDWR != 0)
+            .create(bits & omode::CREATE != 0)
+            .truncate(bits & omode::TRUNC != 0);
+        mode
+    }
+
+    pub fn is_read(&self) -> bool {
+        self.read
+    }
+
+    pub fn is_write(&self) -> bool {
+        self.write
+    }
+
+    pub fn is_create(&self) -> bool {
+        self.create
+    }
+
+    pub fn is_trunc(&self) -> bool {
+        self.truncate
+    }
+
+    pub fn is_rdonly(&self) -> bool {
+        self.read && !self.write
     }
 }

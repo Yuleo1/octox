@@ -2,6 +2,7 @@
 use crate::array;
 #[cfg(target_os = "none")]
 use crate::fcntl::OMode;
+use crate::fs::{Path, create};
 #[cfg(target_os = "none")]
 use crate::fs::{IData, Inode};
 #[cfg(target_os = "none")]
@@ -10,6 +11,8 @@ use crate::lazy::{SyncLazy, SyncOnceCell};
 use crate::param::{NDEV, NFILE};
 #[cfg(target_os = "none")]
 use crate::pipe::Pipe;
+#[cfg(target_os = "none")]
+use crate::sleeplock::SleepLock;
 #[cfg(target_os = "none")]
 use crate::sleeplock::SleepLockGuard;
 #[cfg(target_os = "none")]
@@ -35,7 +38,8 @@ type FTable = Mutex<[Option<Arc<VFile>>; NFILE]>;
 pub enum VFile {
     Device(&'static dyn Device),
     FsFile(FsFile),
-    Pipe(Pipe),
+    Pipe(Pipe<u8>),
+    Null,
 }
 
 // Device functions, map this trait using dyn
@@ -80,6 +84,7 @@ pub struct File {
 //    }
 //}
 
+#[cfg(target_os = "none")]
 impl File {
     // Read from file.
     pub fn read(&self, dst: VirtAddr, n: usize) -> Result<usize, ()> {
@@ -98,6 +103,7 @@ impl File {
     }
 }
 
+#[cfg(target_os = "none")]
 impl VFile {
     fn read(&self, dst: VirtAddr, n: usize) -> Result<usize, ()> {
         match self {
@@ -131,15 +137,57 @@ impl FsFile {
     }
 }
 
+
+
+// File Allocation Type Source
+#[cfg(target_os = "none")]
+pub enum Fats<'a> {
+    Inode(&'a Path),
+    Pipe(Pipe<u8>),
+}
+
 #[cfg(target_os = "none")]
 impl FTable {
     // Allocate a file structure
-    pub fn alloc<'b>(
-        &'b self,
-        ip: Inode,
-        ip_guard: SleepLockGuard<'b, IData>,
+    pub fn alloc<'a, 'b>(
+        &'a self,
+        fats: Fats<'b>,
         opts: OMode,
-    ) -> Option<(File, SleepLockGuard<IData>)> {
+    ) -> Option<File> {
+
+        let inner: Arc<VFile> = Arc::new(match fats {
+            Fats::Inode(path) => { 
+                let ip: Inode;
+                let mut ip_guard: SleepLockGuard<'_, IData>;
+
+                if opts.is_create() {
+                    ip = create(path, IType::File, 0, 0)?;
+                    ip_guard = ip.lock();
+                } else {
+                    (_, ip) = path.namei()?;
+                    ip_guard = ip.lock();
+                    if ip_guard.itype() == IType::Dir && !opts.is_rdonly() {
+                        return None;
+                    }
+                }
+                // todo 
+                match ip_guard.itype() {
+                    IType::Device if ip_guard.major() != Major::Invalid && ip_guard.major() != Major::Null => {
+                        VFile::Device(DEVSW.get(ip_guard.major()).unwrap())
+                    },
+                    IType::Dir | IType::File => {
+                        if opts.is_trunc() && ip_guard.itype() == IType::File {
+                            ip_guard.trunc();
+                        }
+                        SleepLock::unlock(ip_guard);
+                        VFile::FsFile(FsFile::new(ip))
+                    },
+                    _ => return None,
+                }
+            },
+            Fats::Pipe(pi) => todo!(),
+        });
+
         let mut guard = self.lock();
 
         let mut empty: Option<&mut Option<Arc<VFile>>> = None;
@@ -154,20 +202,14 @@ impl FTable {
         }
 
         let f = empty?;
-        f.replace(Arc::new(match ip_guard.itype {
-            IType::Device => VFile::Device(DEVSW.get(ip_guard.major).unwrap()),
-            IType::File => VFile::FsFile(FsFile::new(ip)),
-            _ => unreachable!(),
-        }));
-
-        Some((
+        f.replace(inner);
+        Some(
             File {
                 f: f.clone(), // ref count = 2
-                readable: opts.is_readable(),
-                writable: opts.is_writable(),
-            },
-            ip_guard,
-        ))
+                readable: opts.is_read(),
+                writable: opts.is_write(),
+            }
+        )
     }
 }
 
@@ -223,9 +265,20 @@ impl DevSW {
 pub enum Major {
     Null = 0,
     Console = 1,
+    Invalid,
 }
 impl Default for Major {
     fn default() -> Self {
         Self::Null
+    }
+}
+
+impl Major {
+    pub fn from_usize(bits: u16) -> Major {
+        match bits {
+            0 => Major::Null,
+            1 => Major::Console,
+            _ => Major::Invalid,
+        }
     }
 }

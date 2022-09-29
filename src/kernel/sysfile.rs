@@ -58,19 +58,6 @@ impl SysCalls<'_> {
 
         LOG.begin_op();
 
-        match OMode::from_usize(omode) {
-            Some(OMode::CREATE) => {
-                todo!()
-            }
-            _ => {
-                //if let Some(_) = namei(path) {
-                //todo!()
-                //} else {
-                //  LOG.end_op();
-                //return Err(());
-                //}
-            }
-        }
         Err(())
     }
 }

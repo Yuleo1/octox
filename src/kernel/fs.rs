@@ -259,8 +259,8 @@ pub struct IData {
     dev: u32,
     inum: u32,
     valid: bool,
-    pub itype: IType,
-    pub major: Major,
+    itype: IType,
+    major: Major,
     minor: u16,
     nlink: u16,
     size: u32,
@@ -276,6 +276,15 @@ impl IData {
             ..Default::default()
         }
     }
+
+    pub fn itype(&self) -> IType {
+        self.itype
+    }
+
+    pub fn major(&self) -> Major {
+        self.major
+    }
+
     // Copy a modified in-memory inode to disk.
     // Must be called after every change to an inode field
     // that lives on disk.
@@ -298,7 +307,7 @@ impl IData {
 
     // Trancate inode (discard contents).
     // Caller must hold inode sleeplock.
-    fn trunc(&mut self) {
+    pub fn trunc(&mut self) {
         for addr in self.addrs.iter_mut().take(NDIRECT) {
             if *addr > 0 {
                 bfree(self.dev, *addr);
@@ -624,8 +633,7 @@ impl ITable {
     // Allocate an inode on device dev.
     // Mark it as allocated by giving it type.
     // Returns an unlocked but allocated and referenced inode.
-    pub fn alloc(&self, dev: u32, itype: IType) -> Inode {
-        // todo: use Result
+    fn alloc(&self, dev: u32, itype: IType) -> Option<Inode> {
         let sb = SB.get().unwrap();
         for inum in 1..sb.ninodes {
             let mut bp = BCACHE.read(dev, sb.iblock(inum));
@@ -638,10 +646,11 @@ impl ITable {
                 *dip = Default::default();
                 dip.itype = itype;
                 LOG.write(bp);
-                return self.get(dev, inum);
+                return Some(self.get(dev, inum));
             }
         }
-        unreachable!("ialloc: no inodes");
+        println!("ialloc: no inodes");
+        None
     }
 
     // Find the inode with number inum on device dev
@@ -714,6 +723,54 @@ impl ITable {
     }
 }
 
+pub fn create(path: &Path, type_: IType, major: u16, minor: u16) -> Option<Inode> {
+   
+    let (name, dp)= path.nameiparent()?;
+    let mut dp_guard = dp.lock();
+
+
+    if let Some(ip) = dp_guard.dirlookup(name, None) {
+        SleepLock::unlock(dp_guard);
+        let ip_guard = ip.lock(); 
+        match type_ {
+            IType::File if ip_guard.itype == IType::File || ip_guard.itype == IType::Device => {
+                SleepLock::unlock(ip_guard); 
+                return Some(ip)
+            },
+            _ => return None,
+        }
+    }
+    
+    let ip = ITABLE.alloc(dp.dev, type_)?;
+    let mut ip_guard = ip.lock();
+    ip_guard.major = Major::from_usize(major);
+    ip_guard.minor = minor;
+    ip_guard.update();
+
+    if type_ == IType::Dir {
+        // Create . and .. entries.
+        // No ip->nlink++ for ".": avoid cyclic ref count.
+        ip_guard.dirlink(".", ip.inum).ok()?;
+        ip_guard.dirlink("..", dp.inum).ok()?;
+    }
+
+    dp_guard.dirlink(name, ip.inum).ok()?;
+
+    // now that success is garanteed
+
+    if type_ == IType::Dir {
+        dp_guard.nlink += 1; // for ".."
+        dp_guard.update();
+    }
+    
+    ip_guard.nlink = 1;
+    ip_guard.update();
+
+    SleepLock::unlock(dp_guard);
+    SleepLock::unlock(ip_guard);
+    Some(ip)
+}
+
 // Paths
 // A slice of a path (akin to str)
 #[cfg(target_os = "none")]
@@ -758,7 +815,7 @@ impl Path {
     // when dropping an inode.
     // # Safety:
     // call inside a transaction.
-    pub unsafe fn namex(path: &Path, parent: bool) -> Option<Inode> {
+    pub fn namex<'a>(path: &'a Path, parent: bool) -> Option<(&'a str, Inode)> {
         let mut ip = match path.inner.get(0..1) {
             Some("/") => ITABLE.get(ROOTDEV, ROOTINO),
             _ => unsafe { &(*CPUS.my_proc().unwrap().data.get()) }
@@ -787,24 +844,24 @@ impl Path {
                 (Some(name), None) if !parent => {
                     if let Some(ip) = guard.dirlookup(name, None) {
                         SleepLock::unlock(guard);
-                        break Some(ip);
+                        break Some((name, ip));
                     }
                     break None;
                 }
-                (Some(_), None) => {
+                (Some(name), None) => {
                     SleepLock::unlock(guard);
-                    break Some(ip);
+                    break Some((name, ip));
                 }
                 _ => break None,
             }
         }
     }
 
-    pub unsafe fn namei(&mut self) -> Option<Inode> {
+    pub fn namei<'a>(&'a self) -> Option<(&'a str, Inode)> {
         Self::namex(self, false)
     }
 
-    pub unsafe fn nameiparent(&mut self) -> Option<Inode> {
+    pub fn nameiparent<'a>(&'a self) -> Option<(&'a str, Inode)> {
         Self::namex(self, true)
     }
 }
