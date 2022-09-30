@@ -29,17 +29,25 @@ use core::cell::UnsafeCell;
 #[cfg(target_os = "none")]
 pub static DEVSW: DevSW = DevSW::new();
 #[cfg(target_os = "none")]
-pub static FTABLE: SyncLazy<Mutex<[Option<Arc<VFile>>; NFILE]>> = SyncLazy::new(|| todo!());
+pub static FTABLE: SyncLazy<FTable> = SyncLazy::new(|| todo!());
 
 #[cfg(target_os = "none")]
 type FTable = Mutex<[Option<Arc<VFile>>; NFILE]>;
 
 #[cfg(target_os = "none")]
+#[derive(Default, Clone)]
+pub struct File {
+    f: Option<Arc<VFile>>,
+    readable: bool,
+    writable: bool,
+}
+
+#[cfg(target_os = "none")]
 pub enum VFile {
     Device(&'static dyn Device),
-    FsFile(FsFile),
-    Pipe(Pipe<u8>),
-    Null,
+    Inode(FsFD),
+    Pipe(Pipe),
+    None,
 }
 
 // Device functions, map this trait using dyn
@@ -58,64 +66,13 @@ impl core::fmt::Debug for dyn Device {
 }
 
 #[cfg(target_os = "none")]
-pub struct FsFile {
+pub struct FsFD {
     off: UnsafeCell<u32>,
     ip: Inode,
 }
 
 #[cfg(target_os = "none")]
-#[derive(Default, Clone)]
-pub struct File {
-    f: Option<Arc<VFile>>,
-    readable: bool,
-    writable: bool,
-}
-
-//impl File {
-//    pub fn read(&self) -> Result<usize, ()> {
-//        if let Some(ref f) = self.f {
-//            match f {
-//               Arc<VFile::
-//            }
-//            Ok(1)
-//        } else {
-//            Err(())
-//        }
-//    }
-//}
-
-#[cfg(target_os = "none")]
-impl File {
-    // Read from file.
-    pub fn read(&self, dst: VirtAddr, n: usize) -> Result<usize, ()> {
-        if !self.readable {
-            return Err(());
-        }
-        self.f.as_ref().unwrap().read(dst, n)
-    }
-
-    // Write to file f.
-    pub fn write(&self, src: VirtAddr, n: usize) -> Result<usize, ()> {
-        if !self.writable {
-            return Err(());
-        }
-        todo!()
-    }
-}
-
-#[cfg(target_os = "none")]
-impl VFile {
-    fn read(&self, dst: VirtAddr, n: usize) -> Result<usize, ()> {
-        match self {
-            VFile::Device(d) => d.read(dst, n),
-            VFile::FsFile(f) => f.read(dst, n),
-            _ => Err(()),
-        }
-    }
-}
-
-#[cfg(target_os = "none")]
-impl FsFile {
+impl FsFD {
     pub fn new(ip: Inode) -> Self {
         Self {
             off: UnsafeCell::new(0),
@@ -137,13 +94,50 @@ impl FsFile {
     }
 }
 
+#[cfg(target_os = "none")]
+impl VFile {
+    fn read(&self, dst: VirtAddr, n: usize) -> Result<usize, ()> {
+        match self {
+            VFile::Device(d) => d.read(dst, n),
+            VFile::Inode(f) => f.read(dst, n),
+            _ => Err(()),
+        }
+    }
+}
 
+#[cfg(target_os = "none")]
+impl File {
+    // Read from file.
+    pub fn read(&self, dst: VirtAddr, n: usize) -> Result<usize, ()> {
+        if !self.readable {
+            return Err(());
+        }
+        self.f.as_ref().unwrap().read(dst, n)
+    }
+
+    // Write to file f.
+    pub fn write(&self, src: VirtAddr, n: usize) -> Result<usize, ()> {
+        if !self.writable {
+            return Err(());
+        }
+        todo!()
+    }
+}
 
 // File Allocation Type Source
 #[cfg(target_os = "none")]
-pub enum Fats<'a> {
-    Inode(&'a Path),
-    Pipe(Pipe<u8>),
+pub enum FType<'a> {
+    Node(&'a Path),
+    Pipe(Pipe),
+}
+
+impl<'a> FType<'a> {
+    pub fn from_path(path: &'a Path) -> Self {
+        Self::Node(path)
+    }
+    pub fn from_pipe(pipe: Pipe) -> Self {
+        Self::Pipe(pipe)
+    }
 }
 
 #[cfg(target_os = "none")]
@@ -151,12 +145,12 @@ impl FTable {
     // Allocate a file structure
     pub fn alloc<'a, 'b>(
         &'a self,
-        fats: Fats<'b>,
         opts: OMode,
+        ftype: FType<'b>,
     ) -> Option<File> {
 
-        let inner: Arc<VFile> = Arc::new(match fats {
-            Fats::Inode(path) => { 
+        let inner: Arc<VFile> = Arc::new(match ftype {
+            FType::Node(path) => { 
                 let ip: Inode;
                 let mut ip_guard: SleepLockGuard<'_, IData>;
 
@@ -180,12 +174,14 @@ impl FTable {
                             ip_guard.trunc();
                         }
                         SleepLock::unlock(ip_guard);
-                        VFile::FsFile(FsFile::new(ip))
+                        VFile::Inode(FsFD::new(ip))
                     },
                     _ => return None,
                 }
             },
-            Fats::Pipe(pi) => todo!(),
+            FType::Pipe(pi) => {
+                VFile::Pipe(pi)
+            },
         });
 
         let mut guard = self.lock();

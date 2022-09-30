@@ -23,11 +23,11 @@ impl OMode {
         }
     }
 
-    fn read(&mut self, read: bool) -> &mut Self {
+    pub fn read(&mut self, read: bool) -> &mut Self {
         self.read = read;
         self
     }
-    fn write(&mut self, write: bool) -> &mut Self {
+    pub fn write(&mut self, write: bool) -> &mut Self {
         self.write = write;
         self
     }
