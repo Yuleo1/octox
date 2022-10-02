@@ -2,19 +2,18 @@
 use crate::array;
 #[cfg(target_os = "none")]
 use crate::fcntl::OMode;
-use crate::fs::{Path, create};
 #[cfg(target_os = "none")]
-use crate::fs::{IData, Inode};
+use crate::fs::{Path, create, BSIZE, IData, Inode};
 #[cfg(target_os = "none")]
 use crate::lazy::{SyncLazy, SyncOnceCell};
 #[cfg(target_os = "none")]
-use crate::param::{NDEV, NFILE};
+use crate::log::LOG;
+#[cfg(target_os = "none")]
+use crate::param::{NDEV, NFILE, MAXOPBLOCKS};
 #[cfg(target_os = "none")]
 use crate::pipe::Pipe;
 #[cfg(target_os = "none")]
-use crate::sleeplock::SleepLock;
-#[cfg(target_os = "none")]
-use crate::sleeplock::SleepLockGuard;
+use crate::sleeplock::{SleepLock, SleepLockGuard};
 #[cfg(target_os = "none")]
 use crate::spinlock::Mutex;
 #[cfg(target_os = "none")]
@@ -43,6 +42,7 @@ pub struct File {
 }
 
 #[cfg(target_os = "none")]
+#[derive(Debug)]
 pub enum VFile {
     Device(&'static dyn Device),
     Inode(FsFD),
@@ -66,6 +66,7 @@ impl core::fmt::Debug for dyn Device {
 }
 
 #[cfg(target_os = "none")]
+#[derive(Debug)]
 pub struct FsFD {
     off: UnsafeCell<u32>,
     ip: Inode,
@@ -79,7 +80,7 @@ impl FsFD {
             ip,
         }
     }
-    pub fn read(&self, dst: VirtAddr, n: usize) -> Result<usize, ()> {
+    fn read(&self, dst: VirtAddr, n: usize) -> Result<usize, ()> {
         let mut ip = self.ip.lock();
         let off = unsafe { &mut *self.off.get() };
 
@@ -92,6 +93,44 @@ impl FsFD {
             Err(_) => Err(()),
         }
     }
+    fn write(&self, src: VirtAddr, n: usize) -> Result<usize, ()> {
+        // write a few blocks at a time to avoid exceeding the maximum
+        // log transaction size, including i-node, indirect block,
+        // allocation blocks, and 2 blocks of slop for non-aligned
+        // writes. this really belongs lower down, since inode write()
+        // might be writing a device like the console.
+        let max = ((MAXOPBLOCKS - 1 - 1 - 2) / 2) * BSIZE;
+        let mut i: usize = 0;
+        let off = unsafe { &mut *self.off.get() };
+        while i < n {
+            let mut r: usize = 0;
+            let mut n1 = n - i;
+            if n1 > max { n1 = max }
+            
+
+            {
+                LOG.begin_op();
+                let mut guard = self.ip.lock();
+                if let Ok(wbytes) = guard.write(src, *off, n1) {
+                    *off += wbytes as u32;
+                    r = wbytes;
+                }
+                LOG.end_op();
+            }
+
+            if r != n1 {
+                // error from inode write
+                break;
+            }
+            i += r;
+        }
+
+        if i == n {
+            Ok(n)
+        } else {
+            Err(())
+        }
+    }
 }
 
 #[cfg(target_os = "none")]
@@ -100,14 +139,23 @@ impl VFile {
         match self {
             VFile::Device(d) => d.read(dst, n),
             VFile::Inode(f) => f.read(dst, n),
-            _ => Err(()),
+            VFile::Pipe(p) => p.read(dst, n),
+            _ => panic!("file read"),
+        }
+    }
+    fn write(&self, src: VirtAddr, n: usize) -> Result<usize, ()> {
+        match self {
+            VFile::Device(d) => d.write(src, n),
+            VFile::Inode(f) => f.write(src, n),
+            VFile::Pipe(p) => p.write(src, n),
+            _ => panic!("file write"),
         }
     }
 }
 
 #[cfg(target_os = "none")]
 impl File {
-    // Read from file.
+    // Read from file f.
     pub fn read(&self, dst: VirtAddr, n: usize) -> Result<usize, ()> {
         if !self.readable {
             return Err(());
@@ -120,7 +168,39 @@ impl File {
         if !self.writable {
             return Err(());
         }
-        todo!()
+        self.f.as_ref().unwrap().write(src, n)
+    }
+}
+
+impl Drop for File {
+    fn drop(&mut self) {
+        let f = self.f.take().unwrap();
+        if Arc::strong_count(&f) < 2 {
+            panic!("file drop");
+        }
+
+        if Arc::strong_count(&f) == 2 {
+            let mut guard = FTABLE.lock();
+            // drop arc<vfile> in table 
+            for ff in guard.iter_mut() {
+                match ff {
+                    Some(vff) if Arc::ptr_eq(&f, vff) => {
+                        ff.take(); // drop ref in table. ref count = 1;
+                    },
+                    _ => (),
+                }
+            }
+        }
+
+        // if ref count == 1
+        match Arc::try_unwrap(f) {
+            Ok(VFile::Inode(ip)) => {
+                LOG.begin_op();
+                drop(ip);
+                LOG.end_op();
+            },
+            _ => ()
+        }
     }
 }
 

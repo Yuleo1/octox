@@ -240,13 +240,14 @@ pub static ITABLE: SyncLazy<Mutex<[Option<Arc<MInode>>; NINODE]>> = SyncLazy::ne
 // Inode passed from ITABLE.
 // Wrapper for in-memory inode i.e. MInode
 #[cfg(target_os = "none")]
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub struct Inode {
     ip: Option<Arc<MInode>>,
 }
 
 // in-memory copy of an inode
 #[cfg(target_os = "none")]
+#[derive(Debug)]
 pub struct MInode {
     dev: u32,
     inum: u32,

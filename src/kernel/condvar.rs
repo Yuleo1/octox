@@ -3,6 +3,7 @@ use crate::{
     spinlock::MutexGuard,
 };
 
+#[derive(Debug)]
 pub struct Condvar;
 
 impl Condvar {

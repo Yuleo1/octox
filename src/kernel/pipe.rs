@@ -1,5 +1,6 @@
-use crate::{mpmc::*, file::{File, FTABLE, FType}, fcntl::OMode, vm::VirtAddr, proc::CPUS};
+use crate::{mpmc::*, file::{File, FTABLE, FType}, fcntl::OMode, vm::VirtAddr, proc::{CPUS, CopyInOut}};
 
+#[derive(Debug)]
 pub struct Pipe {
     rx: Option<SyncReceiver<u8>>,
     tx: Option<SyncSender<u8>>,
@@ -32,16 +33,35 @@ impl Pipe {
         Ok((f0, f1))
     }
 
+    pub fn write(&self, src: VirtAddr, n: usize) -> Result<usize, ()> {
+        let p = CPUS.my_proc().unwrap();
+
+        let tx = self.tx.as_ref().ok_or(())?;
+
+        let mut i = 0;
+        while i < n {
+            let mut ch: u8 = 0;
+            if unsafe { p.either_copyin(&mut ch, src) }.is_err() {
+                break;
+            }
+            tx.send(ch);
+            i += 1;
+        }
+        Ok(i)
+    }
+
     pub fn read(&self, dst: VirtAddr, n: usize) -> Result<usize, ()> {
         let p = CPUS.my_proc().unwrap();
 
         let rx = self.rx.as_ref().ok_or(())?;
 
         let mut i = 0;
-        for idx in 0..n {
+        while i < n {
             let ch = rx.recv();
-            todo!()
-            //i = idx;
+            if unsafe { p.either_copyout(dst, &ch) }.is_err() {
+                break;
+            }
+            i += 1;
         }
         Ok(i)
     }

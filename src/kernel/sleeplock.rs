@@ -10,6 +10,7 @@ use core::{
 // Sleeping locks
 
 // Long-term locks for processes
+#[derive(Debug)]
 pub struct SleepLock<T> {
     lk: Mutex<SleepLockInfo>, // spinlock protecting this sleep lock
     data: UnsafeCell<T>,
@@ -18,6 +19,7 @@ pub struct SleepLock<T> {
 unsafe impl<T> Sync for SleepLock<T> {}
 unsafe impl<T> Send for SleepLock<T> {}
 
+#[derive(Debug)]
 struct SleepLockInfo {
     locked: bool,
     pid: usize,

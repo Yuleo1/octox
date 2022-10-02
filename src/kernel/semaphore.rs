@@ -1,5 +1,6 @@
 use crate::{condvar::Condvar, spinlock::Mutex};
 
+#[derive(Debug)]
 pub struct Semaphore {
     mutex: Mutex<usize>,
     cond: Condvar,

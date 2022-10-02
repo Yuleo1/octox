@@ -3,7 +3,7 @@ use crate::semaphore::Semaphore;
 use crate::spinlock::Mutex;
 use alloc::{collections::LinkedList, sync::Arc};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SyncSender<T> {
     sem: Arc<Semaphore>,
     buf: Arc<Mutex<LinkedList<T>>>,
@@ -19,7 +19,7 @@ impl<T: Send> SyncSender<T> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SyncReceiver<T> {
     sem: Arc<Semaphore>,
     buf: Arc<Mutex<LinkedList<T>>>,
