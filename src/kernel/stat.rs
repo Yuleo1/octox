@@ -13,7 +13,8 @@ impl Default for IType {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone, Copy)]
+#[repr(C)]
 pub struct Stat {
     pub dev: u32,     // File system's disk device
     pub ino: u32,     // Inode number
