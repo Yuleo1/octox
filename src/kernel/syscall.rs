@@ -89,7 +89,7 @@ impl SysCalls<'_> {
     // Fetch the data at addr from the current process.
     // # Safety:
     // T memlayout is fixed
-    pub unsafe fn fetch_data<T: ?Sized>(&mut self, addr: UVAddr, buf: &mut T) -> Result<(), ()> {
+    pub unsafe fn fetch_data<T: ?Sized>(&mut self, addr: UVAddr, buf: &mut T) -> Result<usize, ()> {
         if addr.into_usize() >= self.data.sz || addr.into_usize() + size_of_val(buf) > self.data.sz
         {
             // both tests needed, in case of overflow
@@ -126,20 +126,20 @@ impl SysCalls<'_> {
             Some(SysCallNum::SysRead) => self.sys_read(),
             Some(SysCallNum::SysKill) => todo!(),
             Some(SysCallNum::SysExec) => todo!(),
-            Some(SysCallNum::SysFstat) => todo!(),
+            Some(SysCallNum::SysFstat) => self.sys_fstat(),
             Some(SysCallNum::SysChdir) => todo!(),
             Some(SysCallNum::SysDup) => self.sys_dup(),
             Some(SysCallNum::SysGetpid) => todo!(),
             Some(SysCallNum::SysSbrk) => todo!(),
             Some(SysCallNum::SysSleep) => todo!(),
             Some(SysCallNum::SysUptime) => todo!(),
-            Some(SysCallNum::SysOpen) => todo!(),
-            Some(SysCallNum::SysWrite) => todo!(),
+            Some(SysCallNum::SysOpen) => self.sys_open(),
+            Some(SysCallNum::SysWrite) => self.sys_write(),
             Some(SysCallNum::SysMknod) => todo!(),
             Some(SysCallNum::SysUnlink) => todo!(),
             Some(SysCallNum::SysLink) => todo!(),
             Some(SysCallNum::SysMkdir) => todo!(),
-            Some(SysCallNum::SysClose) => todo!(),
+            Some(SysCallNum::SysClose) => self.sys_close(),
             None => {
                 println!("unknown sys call {}", self.tf.a7);
                 Err(())

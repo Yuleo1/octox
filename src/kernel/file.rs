@@ -13,17 +13,21 @@ use crate::param::{NDEV, NFILE, MAXOPBLOCKS};
 #[cfg(target_os = "none")]
 use crate::pipe::Pipe;
 #[cfg(target_os = "none")]
+use crate::proc::{CPUS, CopyInOut};
+#[cfg(target_os = "none")]
 use crate::sleeplock::{SleepLock, SleepLockGuard};
 #[cfg(target_os = "none")]
 use crate::spinlock::Mutex;
 #[cfg(target_os = "none")]
-use crate::stat::IType;
+use crate::stat::{IType, Stat};
 #[cfg(target_os = "none")]
 use crate::vm::VirtAddr;
 #[cfg(target_os = "none")]
 use alloc::sync::Arc;
 #[cfg(target_os = "none")]
 use core::cell::UnsafeCell;
+#[cfg(target_os = "none")]
+use core::ops::Deref;
 
 #[cfg(target_os = "none")]
 pub static DEVSW: DevSW = DevSW::new();
@@ -44,10 +48,18 @@ pub struct File {
 #[cfg(target_os = "none")]
 #[derive(Debug)]
 pub enum VFile {
-    Device(&'static dyn Device),
+    Device(DNod),
     Inode(FsFD),
     Pipe(Pipe),
     None,
+}
+
+// Device Node
+#[cfg(target_os = "none")]
+#[derive(Debug)]
+pub struct DNod {
+    driver: &'static dyn Device,
+    ip: Inode
 }
 
 // Device functions, map this trait using dyn
@@ -62,6 +74,14 @@ pub trait Device: Send + Sync {
 impl core::fmt::Debug for dyn Device {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "Device fn {:?}", self.major())
+    }
+}
+
+#[cfg(target_os = "none")]
+impl Deref for DNod {
+    type Target = dyn Device;
+    fn deref(&self) -> &Self::Target {
+        self.driver
     }
 }
 
@@ -151,11 +171,27 @@ impl VFile {
             _ => panic!("file write"),
         }
     }
+    // Get metadata about file.
+    // addr pointing to a struct stat.
+    pub fn stat(&self, addr: VirtAddr) -> Result<usize, ()> {
+        let p = CPUS.my_proc().unwrap();
+        let mut stat: Stat = Default::default();
+
+        match self {
+            VFile::Device(DNod { driver: _, ref ip }) | VFile::Inode(FsFD { off: _, ref ip }) => {
+                {
+                    ip.lock().stat(&mut stat);
+                }
+                unsafe { p.either_copyout(addr, &stat) }
+            },
+            _ => Err(())
+        }
+    }
 }
 
 #[cfg(target_os = "none")]
 impl File {
-    // Read from file f.
+    // Read from file.
     pub fn read(&self, dst: VirtAddr, n: usize) -> Result<usize, ()> {
         if !self.readable {
             return Err(());
@@ -163,12 +199,19 @@ impl File {
         self.f.as_ref().unwrap().read(dst, n)
     }
 
-    // Write to file f.
+    // Write to file.
     pub fn write(&self, src: VirtAddr, n: usize) -> Result<usize, ()> {
         if !self.writable {
             return Err(());
         }
         self.f.as_ref().unwrap().write(src, n)
+    }
+}
+
+impl Deref for File {
+    type Target = Arc<VFile>;
+    fn deref(&self) -> &Self::Target {
+        self.f.as_ref().unwrap()
     }
 }
 
@@ -194,7 +237,7 @@ impl Drop for File {
 
         // if ref count == 1
         match Arc::try_unwrap(f) {
-            Ok(VFile::Inode(ip)) => {
+            Ok(VFile::Inode(FsFD { off: _, ip }) | VFile::Device(DNod { driver: _, ip })) => {
                 LOG.begin_op();
                 drop(ip);
                 LOG.end_op();
@@ -211,18 +254,10 @@ pub enum FType<'a> {
     Pipe(Pipe),
 }
 
-impl<'a> FType<'a> {
-    pub fn from_path(path: &'a Path) -> Self {
-        Self::Node(path)
-    }
-    pub fn from_pipe(pipe: Pipe) -> Self {
-        Self::Pipe(pipe)
-    }
-}
-
 #[cfg(target_os = "none")]
 impl FTable {
     // Allocate a file structure
+    // Must be called inside transaction if FType == FType::Node.
     pub fn alloc<'a, 'b>(
         &'a self,
         opts: OMode,
@@ -247,7 +282,9 @@ impl FTable {
                 // todo 
                 match ip_guard.itype() {
                     IType::Device if ip_guard.major() != Major::Invalid && ip_guard.major() != Major::Null => {
-                        VFile::Device(DEVSW.get(ip_guard.major()).unwrap())
+                        let driver = DEVSW.get(ip_guard.major()).unwrap();
+                        SleepLock::unlock(ip_guard);
+                        VFile::Device(DNod { driver, ip })
                     },
                     IType::Dir | IType::File => {
                         if opts.is_trunc() && ip_guard.itype() == IType::File {

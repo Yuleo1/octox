@@ -27,8 +27,8 @@ impl Pipe {
 
         let p0 = Self::new(Some(rx), None);
         let p1 = Self::new(None, Some(tx));
-        let f0 = FTABLE.alloc(p0.get_mode(), FType::from_pipe(p0)).ok_or(())?;
-        let f1 = FTABLE.alloc(p1.get_mode(), FType::from_pipe(p1)).ok_or(())?;
+        let f0 = FTABLE.alloc(p0.get_mode(), FType::Pipe(p0)).ok_or(())?;
+        let f1 = FTABLE.alloc(p1.get_mode(), FType::Pipe(p1)).ok_or(())?;
         
         Ok((f0, f1))
     }

@@ -568,7 +568,7 @@ impl Uvm {
     // Return Result<(), ()>
     // # Safety
     // T mem layout is fixed
-    pub unsafe fn copyout<T: ?Sized>(&mut self, mut dstva: UVAddr, src: &T) -> Result<(), ()> {
+    pub unsafe fn copyout<T: ?Sized>(&mut self, mut dstva: UVAddr, src: &T) -> Result<usize, ()> {
         let src = unsafe { as_bytes(src) };
         let mut len = src.len();
         let mut offset = 0;
@@ -584,7 +584,7 @@ impl Uvm {
             offset += n;
             dstva = va0 + PGSIZE;
         }
-        Ok(())
+        Ok(0)
     }
 
     // Copy from user to kernel.
@@ -592,7 +592,7 @@ impl Uvm {
     // Return Result<(), ()>
     // # safety:
     // T mem layout is fixed.
-    pub unsafe fn copyin<T: ?Sized>(&mut self, dst: &mut T, mut srcva: UVAddr) -> Result<(), ()> {
+    pub unsafe fn copyin<T: ?Sized>(&mut self, dst: &mut T, mut srcva: UVAddr) -> Result<usize, ()> {
         let dst = unsafe { as_bytes_mut(dst) };
         let mut len = dst.len();
         let mut offset = 0;
@@ -607,7 +607,7 @@ impl Uvm {
             offset += n;
             srcva = va0 + PGSIZE;
         }
-        Ok(())
+        Ok(0)
     }
 
     // Copy a null-terminated string from user to kernel.
