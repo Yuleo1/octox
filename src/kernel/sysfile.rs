@@ -1,6 +1,6 @@
 use crate::fcntl::OMode;
 use crate::file::{File, FTABLE, FType};
-use crate::fs::Path;
+use crate::fs::{self, Path};
 use crate::log::LOG;
 use crate::param::MAXPATH;
 use crate::syscall::SysCalls;
@@ -67,6 +67,32 @@ impl SysCalls<'_> {
         let (_, f) = self.arg_fd(1).ok_or(())?;
         
         f.stat(From::from(st))
+    }
+
+    // Create the path new as a link to the same inode as old.
+    pub fn sys_link(&mut self) -> Result<usize, ()> {
+        let mut old = [0; MAXPATH];
+        let mut new = [0; MAXPATH];
+        let old_path = Path::new(self.arg_str(0, &mut old)?);
+        let new_path = Path::new(self.arg_str(1, &mut new)?);
+
+        let res;
+        {
+            LOG.begin_op();
+            res = fs::link(old_path, new_path);
+            LOG.end_op();
+        }
+        res
+    }
+
+    pub fn sys_unlink(&mut self) -> Result<usize, ()> {
+        let res;
+        {
+            LOG.begin_op();
+            res = todo!();
+            LOG.end_op();
+        }
+        res
     }
 
     pub fn sys_open(&mut self) -> Result<RawFd, ()> {

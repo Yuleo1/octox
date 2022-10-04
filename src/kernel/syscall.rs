@@ -137,7 +137,7 @@ impl SysCalls<'_> {
             Some(SysCallNum::SysWrite) => self.sys_write(),
             Some(SysCallNum::SysMknod) => todo!(),
             Some(SysCallNum::SysUnlink) => todo!(),
-            Some(SysCallNum::SysLink) => todo!(),
+            Some(SysCallNum::SysLink) => self.sys_link(),
             Some(SysCallNum::SysMkdir) => todo!(),
             Some(SysCallNum::SysClose) => self.sys_close(),
             None => {

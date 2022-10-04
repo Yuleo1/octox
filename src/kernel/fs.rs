@@ -17,6 +17,7 @@ use crate::{
     vm::VirtAddr,
 };
 use alloc::sync::Arc;
+use core::mem::size_of;
 use core::ops::Deref;
 
 // File system implementation. Five layers:
@@ -475,8 +476,7 @@ impl IData {
 
     // Look for a directory entry in a directory.
     // If found, set *poff to byte offset of entry.
-    pub fn dirlookup(&mut self, name: &str, poff: Option<&mut usize>) -> Option<Inode> {
-        use core::mem::size_of;
+    pub fn dirlookup(&mut self, name: &str, poff: Option<&mut u32>) -> Option<Inode> {
 
         let mut de: DirEnt = Default::default();
         if self.itype != IType::Dir {
@@ -500,7 +500,7 @@ impl IData {
             {
                 // entry matches path element
                 if let Some(poff) = poff {
-                    *poff = off as usize;
+                    *poff = off;
                 }
                 return Some(ITABLE.get(self.dev, de.inum as u32));
             }
@@ -510,7 +510,6 @@ impl IData {
 
     // Write a new directory entry (name, inum) into the directory dp.
     pub fn dirlink(&mut self, name: &str, inum: u32) -> Result<(), &'static str> {
-        use core::mem::size_of;
 
         let mut de: DirEnt = Default::default();
 
@@ -544,6 +543,20 @@ impl IData {
         .unwrap();
 
         Ok(())
+    }
+
+    // Is the directory dp empty except for "." and ".." ?
+    pub fn is_dir_empty(&mut self) -> bool {
+        let mut de: DirEnt = Default::default();
+        for off in ((2 * size_of::<DirEnt>() as u32)..self.size).step_by(size_of::<DirEnt>()) {
+            if self.read(VirtAddr::Kernel(&mut de as *mut _ as usize), off, size_of::<DirEnt>()).is_err() {
+                panic!("isdirempty: inode read");
+            }
+            if de.inum != 0 {
+                return false;
+            }
+        }
+        true
     }
 }
 
@@ -724,51 +737,111 @@ impl ITable {
     }
 }
 
-pub fn create(path: &Path, type_: IType, major: u16, minor: u16) -> Option<Inode> {
-   
-    let (name, dp)= path.nameiparent()?;
-    let mut dp_guard = dp.lock();
-
-
-    if let Some(ip) = dp_guard.dirlookup(name, None) {
-        SleepLock::unlock(dp_guard);
-        let ip_guard = ip.lock(); 
-        match type_ {
-            IType::File if ip_guard.itype == IType::File || ip_guard.itype == IType::Device => {
-                SleepLock::unlock(ip_guard); 
-                return Some(ip)
-            },
-            _ => return None,
+// Create the path new as a link to the same inode as old.
+pub fn link(old: &Path, new: &Path) -> Result<usize, ()> {
+    let (_, ip) = old.namei().ok_or(())?;
+    {
+        let ip_guard = ip.lock();
+        if ip_guard.itype == IType::Dir {
+            return Err(());
         }
     }
-    
-    let ip = ITABLE.alloc(dp.dev, type_)?;
-    let mut ip_guard = ip.lock();
-    ip_guard.major = Major::from_usize(major);
-    ip_guard.minor = minor;
-    ip_guard.update();
-
-    if type_ == IType::Dir {
-        // Create . and .. entries.
-        // No ip->nlink++ for ".": avoid cyclic ref count.
-        ip_guard.dirlink(".", ip.inum).ok()?;
-        ip_guard.dirlink("..", dp.inum).ok()?;
+    //todo!()
+        
+    let (name, dp) = new.nameiparent().ok_or(())?;
+    let mut dp_guard = dp.lock();
+    if dp.dev != ip.dev || dp_guard.dirlink(name, ip.inum).is_err() {
+        return Err(());
     }
 
-    dp_guard.dirlink(name, ip.inum).ok()?;
+    {
+        let mut ip_guard = ip.lock();
+        ip_guard.nlink += 1;
+        ip_guard.update();
+    }
+    Ok(0)
+}
 
-    // now that success is garanteed
+pub fn unlink(path: &Path) -> Result<usize, ()> {
+    let de: DirEnt = Default::default();
+    let mut off: u32 = 0;
+    
 
-    if type_ == IType::Dir {
-        dp_guard.nlink += 1; // for ".."
+    let (name, dp) = path.nameiparent().ok_or(())?;
+    let mut dp_guard = dp.lock();
+
+    // Cannot unlink "." or ".."
+    if name == "." || name == ".." {
+        return Err(());
+    }
+
+    let ip = dp_guard.dirlookup(name, Some(&mut off)).ok_or(())?;
+    let mut ip_guard = ip.lock();
+
+    if ip_guard.nlink < 1 {
+        panic!("unlink: nlink < 1");
+    }
+    if ip_guard.itype == IType::Dir && !ip_guard.is_dir_empty() {
+        return Err(());
+    }
+   
+    dp_guard.write(VirtAddr::Kernel(&de as *const _ as usize), off, size_of::<DirEnt>()).unwrap();
+    if ip_guard.itype == IType::Dir {
+        dp_guard.nlink -= 1;
         dp_guard.update();
     }
-    
-    ip_guard.nlink = 1;
+
+    ip_guard.nlink -= 1;
     ip_guard.update();
 
-    SleepLock::unlock(dp_guard);
-    SleepLock::unlock(ip_guard);
+    Ok(0)
+}
+
+
+pub fn create(path: &Path, type_: IType, major: u16, minor: u16) -> Option<Inode> {
+    let (name, dp)= path.nameiparent()?;
+    let ip: Inode;
+    {
+        let mut dp_guard = dp.lock();
+
+        if let Some(ip) = dp_guard.dirlookup(name, None) {
+            SleepLock::unlock(dp_guard);
+            let ip_guard = ip.lock(); 
+            match type_ {
+                IType::File if ip_guard.itype == IType::File || ip_guard.itype == IType::Device => {
+                    SleepLock::unlock(ip_guard); 
+                    return Some(ip)
+                },
+                _ => return None,
+            }
+        }
+    
+        ip = ITABLE.alloc(dp.dev, type_)?;
+        let mut ip_guard = ip.lock();
+        ip_guard.major = Major::from_usize(major);
+        ip_guard.minor = minor;
+        ip_guard.update();
+
+        if type_ == IType::Dir {
+            // Create . and .. entries.
+            // No ip->nlink++ for ".": avoid cyclic ref count.
+            ip_guard.dirlink(".", ip.inum).ok()?;
+            ip_guard.dirlink("..", dp.inum).ok()?;
+        }
+
+        dp_guard.dirlink(name, ip.inum).ok()?;
+
+        // now that success is garanteed
+
+        if type_ == IType::Dir {
+            dp_guard.nlink += 1; // for ".."
+            dp_guard.update();
+        }
+    
+        ip_guard.nlink = 1;
+        ip_guard.update();
+    }
+
     Some(ip)
 }
 
