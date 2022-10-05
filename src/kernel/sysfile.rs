@@ -3,6 +3,7 @@ use crate::file::{File, FTABLE, FType};
 use crate::fs::{self, Path};
 use crate::log::LOG;
 use crate::param::MAXPATH;
+use crate::stat::IType;
 use crate::syscall::SysCalls;
 
 // Raw file descriptors
@@ -86,10 +87,13 @@ impl SysCalls<'_> {
     }
 
     pub fn sys_unlink(&mut self) -> Result<usize, ()> {
+        let mut path = [0; MAXPATH];
+        let path = Path::new(self.arg_str(0, &mut path)?);
+
         let res;
         {
             LOG.begin_op();
-            res = todo!();
+            res = fs::unlink(&path);
             LOG.end_op();
         }
         res
@@ -107,5 +111,57 @@ impl SysCalls<'_> {
             LOG.end_op();
         }
         fd.ok_or(())
+    }
+
+    pub fn sys_mkdir(&mut self) -> Result<usize, ()> {
+        let mut path = [0; MAXPATH];
+        let path = Path::new(self.arg_str(0, &mut path)?);
+
+        let res;
+        {
+            LOG.begin_op();
+            res = fs::create(path, IType::Dir, 0, 0).and(Some(0)).ok_or(());
+            LOG.end_op();
+        }
+        res
+    }
+
+    pub fn sys_mknod(&mut self) -> Result<usize, ()> {
+        let mut path = [0u8; MAXPATH];
+        let path = Path::new(self.arg_str(0, &mut path)?);
+        let major = self.arg(1) as u16;
+        let minor = self.arg(2) as u16;
+
+        let res;
+        {
+            LOG.begin_op();
+            res = fs::create(path, IType::Device, major, minor).and(Some(0)).ok_or(());
+            LOG.end_op();
+        }
+        res
+    }
+
+    pub fn sys_chdir(&mut self) -> Result<usize, ()> {
+        let mut path = [0u8; MAXPATH];
+        let path = Path::new(self.arg_str(0, &mut path)?);
+
+        let res;
+        {
+            LOG.begin_op();
+            let mut chidr = || -> Result<usize, ()> {
+                let (_, ip) = path.namei().ok_or(())?;
+                {
+                    let ip_guard = ip.lock();
+                    if ip_guard.itype() != IType::Dir {
+                        return Err(());
+                    }
+                }
+                self.data.cwd.replace(ip);
+                Ok(0)
+            };
+            res = chidr();
+            LOG.end_op();
+        }
+        res
     }
 }

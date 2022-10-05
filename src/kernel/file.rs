@@ -387,7 +387,7 @@ impl Default for Major {
 }
 
 impl Major {
-    pub fn from_usize(bits: u16) -> Major {
+    pub fn from_u16(bits: u16) -> Major {
         match bits {
             0 => Major::Null,
             1 => Major::Console,

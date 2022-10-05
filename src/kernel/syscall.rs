@@ -127,7 +127,7 @@ impl SysCalls<'_> {
             Some(SysCallNum::SysKill) => todo!(),
             Some(SysCallNum::SysExec) => todo!(),
             Some(SysCallNum::SysFstat) => self.sys_fstat(),
-            Some(SysCallNum::SysChdir) => todo!(),
+            Some(SysCallNum::SysChdir) => self.sys_chdir(),
             Some(SysCallNum::SysDup) => self.sys_dup(),
             Some(SysCallNum::SysGetpid) => todo!(),
             Some(SysCallNum::SysSbrk) => todo!(),
@@ -135,10 +135,10 @@ impl SysCalls<'_> {
             Some(SysCallNum::SysUptime) => todo!(),
             Some(SysCallNum::SysOpen) => self.sys_open(),
             Some(SysCallNum::SysWrite) => self.sys_write(),
-            Some(SysCallNum::SysMknod) => todo!(),
-            Some(SysCallNum::SysUnlink) => todo!(),
+            Some(SysCallNum::SysMknod) => self.sys_mknod(),
+            Some(SysCallNum::SysUnlink) => self.sys_unlink(),
             Some(SysCallNum::SysLink) => self.sys_link(),
-            Some(SysCallNum::SysMkdir) => todo!(),
+            Some(SysCallNum::SysMkdir) => self.sys_mkdir(),
             Some(SysCallNum::SysClose) => self.sys_close(),
             None => {
                 println!("unknown sys call {}", self.tf.a7);

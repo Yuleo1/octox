@@ -818,7 +818,7 @@ pub fn create(path: &Path, type_: IType, major: u16, minor: u16) -> Option<Inode
     
         ip = ITABLE.alloc(dp.dev, type_)?;
         let mut ip_guard = ip.lock();
-        ip_guard.major = Major::from_usize(major);
+        ip_guard.major = Major::from_u16(major);
         ip_guard.minor = minor;
         ip_guard.update();
 
