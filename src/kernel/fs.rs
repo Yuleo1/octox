@@ -738,7 +738,7 @@ impl ITable {
 }
 
 // Create the path new as a link to the same inode as old.
-pub fn link(old: &Path, new: &Path) -> Result<usize, ()> {
+pub fn link(old: &Path, new: &Path) -> Result<(), ()> {
     let (_, ip) = old.namei().ok_or(())?;
     {
         let ip_guard = ip.lock();
@@ -759,10 +759,10 @@ pub fn link(old: &Path, new: &Path) -> Result<usize, ()> {
         ip_guard.nlink += 1;
         ip_guard.update();
     }
-    Ok(0)
+    Ok(())
 }
 
-pub fn unlink(path: &Path) -> Result<usize, ()> {
+pub fn unlink(path: &Path) -> Result<(), ()> {
     let de: DirEnt = Default::default();
     let mut off: u32 = 0;
     
@@ -794,7 +794,7 @@ pub fn unlink(path: &Path) -> Result<usize, ()> {
     ip_guard.nlink -= 1;
     ip_guard.update();
 
-    Ok(0)
+    Ok(())
 }
 
 

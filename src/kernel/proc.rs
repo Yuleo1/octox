@@ -149,10 +149,10 @@ pub trait Process {
 pub unsafe trait CopyInOut {
     // Copy to either a user address, or kernel address.
     // Return Result <(), ()
-    unsafe fn either_copyout<T: ?Sized>(&self, dst: VirtAddr, src: &T) -> Result<usize, ()>;
+    unsafe fn either_copyout<T: ?Sized>(&self, dst: VirtAddr, src: &T) -> Result<(), ()>;
     // Copy from either a user address, or kernel address,
     // Return Result<(), ()>
-    unsafe fn either_copyin<T: ?Sized>(&self, dst: &mut T, src: VirtAddr) -> Result<usize, ()>;
+    unsafe fn either_copyin<T: ?Sized>(&self, dst: &mut T, src: VirtAddr) -> Result<(), ()>;
 }
 
 // lock must be held when uding these:
@@ -452,7 +452,7 @@ impl Procs {
     // Kill the process with the given pid.
     // The victim won't exit until it tries to return
     // to user space (see usertrap() in trap.rs)
-    pub fn kill(&self, pid: usize) -> Result<usize, ()> {
+    pub fn kill(&self, pid: usize) -> Result<(), ()> {
         for p in self.pool.iter() {
             let mut guard = p.inner.lock();
             if guard.pid.0 == pid {
@@ -462,7 +462,7 @@ impl Procs {
                     guard.state = ProcState::RUNNABLE;
                 }
                 Mutex::unlock(guard);
-                return Ok(0);
+                return Ok(());
             }
         }
         Err(())
@@ -743,7 +743,7 @@ impl Process for Arc<Proc> {
 }
 
 unsafe impl CopyInOut for Arc<Proc> {
-    unsafe fn either_copyout<T: ?Sized>(&self, dst: VirtAddr, src: &T) -> Result<usize, ()> {
+    unsafe fn either_copyout<T: ?Sized>(&self, dst: VirtAddr, src: &T) -> Result<(), ()> {
         match dst {
             VirtAddr::User(addr) => {
                 let uvm = (&mut *self.data.get()).uvm.as_mut().unwrap();
@@ -754,11 +754,11 @@ unsafe impl CopyInOut for Arc<Proc> {
                 let len = src.len();
                 let dst = core::slice::from_raw_parts_mut(addr as *mut u8, len);
                 dst.copy_from_slice(src);
-                Ok(0)
+                Ok(())
             }
         }
     }
-    unsafe fn either_copyin<T: ?Sized>(&self, dst: &mut T, src: VirtAddr) -> Result<usize, ()> {
+    unsafe fn either_copyin<T: ?Sized>(&self, dst: &mut T, src: VirtAddr) -> Result<(), ()> {
         match src {
             VirtAddr::User(addr) => {
                 let uvm = (&mut *self.data.get()).uvm.as_mut().unwrap();
@@ -769,7 +769,7 @@ unsafe impl CopyInOut for Arc<Proc> {
                 let len = dst.len();
                 let src = core::slice::from_raw_parts(addr as *const u8, len);
                 dst.copy_from_slice(src);
-                Ok(0)
+                Ok(())
             }
         }
     }

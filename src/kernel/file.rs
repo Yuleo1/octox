@@ -173,7 +173,7 @@ impl VFile {
     }
     // Get metadata about file.
     // addr pointing to a struct stat.
-    pub fn stat(&self, addr: VirtAddr) -> Result<usize, ()> {
+    pub fn stat(&self, addr: VirtAddr) -> Result<(), ()> {
         let p = CPUS.my_proc().unwrap();
         let mut stat: Stat = Default::default();
 

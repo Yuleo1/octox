@@ -95,7 +95,7 @@ impl SysCalls<'_> {
             // both tests needed, in case of overflow
             return Err(());
         }
-        self.data.uvm.as_mut().unwrap().copyin(buf, addr)
+        self.data.uvm.as_mut().unwrap().copyin(buf, addr).and(Ok(0))
     }
 
     // Fetch the str at addr from the current process.

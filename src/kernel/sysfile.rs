@@ -67,7 +67,7 @@ impl SysCalls<'_> {
         let st = self.arg_addr(0);
         let (_, f) = self.arg_fd(1).ok_or(())?;
         
-        f.stat(From::from(st))
+        f.stat(From::from(st)).and(Ok(0))
     }
 
     // Create the path new as a link to the same inode as old.
@@ -83,7 +83,7 @@ impl SysCalls<'_> {
             res = fs::link(old_path, new_path);
             LOG.end_op();
         }
-        res
+        res.and(Ok(0))
     }
 
     pub fn sys_unlink(&mut self) -> Result<usize, ()> {
@@ -96,7 +96,7 @@ impl SysCalls<'_> {
             res = fs::unlink(&path);
             LOG.end_op();
         }
-        res
+        res.and(Ok(0))
     }
 
     pub fn sys_open(&mut self) -> Result<RawFd, ()> {
