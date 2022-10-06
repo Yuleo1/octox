@@ -749,7 +749,7 @@ unsafe impl CopyInOut for Arc<Proc> {
                 let uvm = (&mut *self.data.get()).uvm.as_mut().unwrap();
                 uvm.copyout(addr.into(), src)
             }
-            VirtAddr::Kernel(addr) => {
+            VirtAddr::Kernel(addr) | VirtAddr::Physical(addr) => {
                 let src = as_bytes(src);
                 let len = src.len();
                 let dst = core::slice::from_raw_parts_mut(addr as *mut u8, len);
@@ -764,7 +764,7 @@ unsafe impl CopyInOut for Arc<Proc> {
                 let uvm = (&mut *self.data.get()).uvm.as_mut().unwrap();
                 uvm.copyin(dst, addr.into())
             }
-            VirtAddr::Kernel(addr) => {
+            VirtAddr::Kernel(addr) | VirtAddr::Physical(addr) => {
                 let dst = as_bytes_mut(dst);
                 let len = dst.len();
                 let src = core::slice::from_raw_parts(addr as *const u8, len);

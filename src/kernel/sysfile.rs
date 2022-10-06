@@ -2,7 +2,7 @@ use crate::fcntl::OMode;
 use crate::file::{File, FTABLE, FType};
 use crate::fs::{self, Path};
 use crate::log::LOG;
-use crate::param::MAXPATH;
+use crate::param::{MAXPATH, MAXARG};
 use crate::stat::IType;
 use crate::syscall::SysCalls;
 
@@ -163,5 +163,20 @@ impl SysCalls<'_> {
             LOG.end_op();
         }
         res
+    }
+
+    pub fn sys_exec(&mut self) -> Result<usize, ()> {
+        let mut path = [0u8; MAXPATH];
+        let mut argv = [""; MAXARG];
+        let mut uargv: usize = 0;
+        let mut uarg: usize = 0;
+
+        let uargv = self.arg_addr(1);
+        let path = Path::new(self.arg_str(0, &mut path)?);
+
+        loop {
+            break;
+        }
+        Ok(0)
     }
 }

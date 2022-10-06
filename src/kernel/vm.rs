@@ -34,6 +34,7 @@ pub struct UVAddr(usize);
 pub enum VirtAddr {
     User(usize),
     Kernel(usize),
+    Physical(usize),
 }
 
 impl From<UVAddr> for VirtAddr {
@@ -45,6 +46,12 @@ impl From<UVAddr> for VirtAddr {
 impl From<KVAddr> for VirtAddr {
     fn from(kv: KVAddr) -> Self {
         VirtAddr::Kernel(kv.0)
+    }
+}
+
+impl From<PAddr> for VirtAddr {
+    fn from(pv: PAddr) -> Self {
+        VirtAddr::Physical(pv.0)
     }
 }
 
@@ -154,6 +161,7 @@ impl Add<usize> for VirtAddr {
         match self {
             VirtAddr::Kernel(addr) => VirtAddr::Kernel(addr + rhs),
             VirtAddr::User(addr) => VirtAddr::User(addr + rhs),
+            VirtAddr::Physical(addr) => VirtAddr::Physical(addr + rhs),
         }
     }
 }
@@ -162,6 +170,7 @@ impl AddAssign<usize> for VirtAddr {
         *self = match self {
             &mut VirtAddr::Kernel(addr) => VirtAddr::Kernel(addr + rhs),
             &mut VirtAddr::User(addr) => VirtAddr::User(addr + rhs),
+            &mut VirtAddr::Physical(addr) => VirtAddr::Physical(addr + rhs),
         };
     }
 }
