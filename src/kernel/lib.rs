@@ -10,8 +10,6 @@
 extern crate alloc;
 
 #[cfg(target_os = "none")]
-pub mod mpmc;
-#[cfg(target_os = "none")]
 pub mod condvar;
 #[cfg(target_os = "none")]
 pub mod console;
@@ -21,6 +19,8 @@ pub mod entry;
 pub mod kernelvec;
 #[cfg(target_os = "none")]
 pub mod memlayout;
+#[cfg(target_os = "none")]
+pub mod mpmc;
 pub mod param;
 #[cfg(target_os = "none")]
 pub mod proc;
@@ -44,6 +44,8 @@ pub mod bio;
 #[cfg(target_os = "none")]
 pub mod buddy;
 pub mod defs;
+#[cfg(target_os = "none")]
+pub mod elf;
 #[cfg(target_os = "none")]
 pub mod exec;
 #[cfg(target_os = "none")]
@@ -81,8 +83,6 @@ pub mod trap;
 pub mod virtio_disk;
 #[cfg(target_os = "none")]
 pub mod vm;
-#[cfg(target_os = "none")]
-pub mod elf;
 
 #[macro_export]
 macro_rules! kmain {

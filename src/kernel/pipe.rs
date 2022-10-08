@@ -1,4 +1,10 @@
-use crate::{mpmc::*, file::{File, FTABLE, FType}, fcntl::OMode, vm::VirtAddr, proc::{CPUS, CopyInOut}};
+use crate::{
+    fcntl::OMode,
+    file::{FType, File, FTABLE},
+    mpmc::*,
+    proc::{CopyInOut, CPUS},
+    vm::VirtAddr,
+};
 
 #[derive(Debug)]
 pub struct Pipe {
@@ -8,12 +14,9 @@ pub struct Pipe {
 
 impl Pipe {
     const PIPESIZE: usize = 512;
-    
+
     pub fn new(rx: Option<SyncReceiver<u8>>, tx: Option<SyncSender<u8>>) -> Self {
-        Self {
-            rx,
-            tx,
-        }
+        Self { rx, tx }
     }
 
     pub fn get_mode(&self) -> OMode {
@@ -22,15 +25,15 @@ impl Pipe {
         omode
     }
 
-    pub fn alloc() -> Result<(File, File), ()> {
+    pub fn alloc() -> Option<(File, File)> {
         let (tx, rx) = sync_channel::<u8>(Self::PIPESIZE, "pipe");
 
         let p0 = Self::new(Some(rx), None);
         let p1 = Self::new(None, Some(tx));
-        let f0 = FTABLE.alloc(p0.get_mode(), FType::Pipe(p0)).ok_or(())?;
-        let f1 = FTABLE.alloc(p1.get_mode(), FType::Pipe(p1)).ok_or(())?;
-        
-        Ok((f0, f1))
+        let f0 = FTABLE.alloc(p0.get_mode(), FType::Pipe(p0))?;
+        let f1 = FTABLE.alloc(p1.get_mode(), FType::Pipe(p1))?;
+
+        Some((f0, f1))
     }
 
     pub fn write(&self, src: VirtAddr, n: usize) -> Result<usize, ()> {

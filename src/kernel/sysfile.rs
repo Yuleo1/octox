@@ -1,10 +1,17 @@
+use crate::array;
+use crate::exec::exec;
 use crate::fcntl::OMode;
-use crate::file::{File, FTABLE, FType};
+use crate::file::{FType, File, FTABLE};
 use crate::fs::{self, Path};
 use crate::log::LOG;
-use crate::param::{MAXPATH, MAXARG};
+use crate::param::{MAXARG, MAXPATH};
+use crate::pipe::Pipe;
+use crate::riscv::PGSIZE;
 use crate::stat::IType;
 use crate::syscall::SysCalls;
+use crate::vm::{Addr, UVAddr};
+use alloc::string::{String, ToString};
+use core::mem::size_of;
 
 // Raw file descriptors
 pub type RawFd = usize;
@@ -66,7 +73,7 @@ impl SysCalls<'_> {
     pub fn sys_fstat(&mut self) -> Result<usize, ()> {
         let st = self.arg_addr(0);
         let (_, f) = self.arg_fd(1).ok_or(())?;
-        
+
         f.stat(From::from(st)).and(Ok(0))
     }
 
@@ -107,7 +114,9 @@ impl SysCalls<'_> {
         let fd;
         {
             LOG.begin_op();
-            fd = FTABLE.alloc(OMode::from_usize(omode), FType::Node(path)).and_then(|f| self.fdalloc(f));
+            fd = FTABLE
+                .alloc(OMode::from_usize(omode), FType::Node(path))
+                .and_then(|f| self.fdalloc(f));
             LOG.end_op();
         }
         fd.ok_or(())
@@ -135,7 +144,9 @@ impl SysCalls<'_> {
         let res;
         {
             LOG.begin_op();
-            res = fs::create(path, IType::Device, major, minor).and(Some(0)).ok_or(());
+            res = fs::create(path, IType::Device, major, minor)
+                .and(Some(0))
+                .ok_or(());
             LOG.end_op();
         }
         res
@@ -167,15 +178,64 @@ impl SysCalls<'_> {
 
     pub fn sys_exec(&mut self) -> Result<usize, ()> {
         let mut path = [0u8; MAXPATH];
-        let mut argv = [""; MAXARG];
-        let mut uargv: usize = 0;
-        let mut uarg: usize = 0;
-
-        let uargv = self.arg_addr(1);
         let path = Path::new(self.arg_str(0, &mut path)?);
 
+        let mut argv: [Option<String>; MAXARG] = array![None; MAXARG];
+        let uargv = self.arg_addr(1);
+        let mut uarg: UVAddr = From::from(0);
+        let mut uarg_cp_buf: [u8; PGSIZE] = [0u8; PGSIZE];
+
+        let mut i = 0;
         loop {
-            break;
+            match argv.get_mut(i) {
+                None => return Err(()),
+                Some(argvi) => {
+                    unsafe { self.fetch_data(uargv + size_of::<usize>() * i, &mut uarg) }?;
+
+                    if uarg.into_usize() == 0 {
+                        break;
+                    }
+
+                    argvi.replace(self.fetch_str(uarg, &mut uarg_cp_buf)?.to_string());
+                    i += 1;
+                }
+            }
+        }
+
+        exec(path, argv)
+    }
+
+    pub fn sys_pipe(&mut self) -> Result<usize, ()> {
+        let fdarray: UVAddr = self.arg_addr(0); // user pointer to array of two integers
+
+        let (rf, wf) = Pipe::alloc().ok_or(())?;
+        let fd0 = self.fdalloc(rf).ok_or(())?;
+        let fd1 = match self.fdalloc(wf) {
+            Some(fd) => fd,
+            _ => {
+                self.data.ofile[fd0].take();
+                return Err(());
+            }
+        };
+
+        if unsafe {
+            self.data
+                .uvm
+                .as_mut()
+                .unwrap()
+                .copyout(fdarray, &fd0)
+                .is_err()
+                || self
+                    .data
+                    .uvm
+                    .as_mut()
+                    .unwrap()
+                    .copyout(fdarray + size_of::<RawFd>(), &fd1)
+                    .is_err()
+        } {
+            self.data.ofile[fd0].take();
+            self.data.ofile[fd1].take();
+            return Err(());
         }
         Ok(0)
     }

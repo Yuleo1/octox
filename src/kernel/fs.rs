@@ -477,7 +477,6 @@ impl IData {
     // Look for a directory entry in a directory.
     // If found, set *poff to byte offset of entry.
     pub fn dirlookup(&mut self, name: &str, poff: Option<&mut u32>) -> Option<Inode> {
-
         let mut de: DirEnt = Default::default();
         if self.itype != IType::Dir {
             panic!("dirlookup not DIR");
@@ -510,7 +509,6 @@ impl IData {
 
     // Write a new directory entry (name, inum) into the directory dp.
     pub fn dirlink(&mut self, name: &str, inum: u32) -> Result<(), &'static str> {
-
         let mut de: DirEnt = Default::default();
 
         // check that name is not present.
@@ -549,7 +547,14 @@ impl IData {
     pub fn is_dir_empty(&mut self) -> bool {
         let mut de: DirEnt = Default::default();
         for off in ((2 * size_of::<DirEnt>() as u32)..self.size).step_by(size_of::<DirEnt>()) {
-            if self.read(VirtAddr::Kernel(&mut de as *mut _ as usize), off, size_of::<DirEnt>()).is_err() {
+            if self
+                .read(
+                    VirtAddr::Kernel(&mut de as *mut _ as usize),
+                    off,
+                    size_of::<DirEnt>(),
+                )
+                .is_err()
+            {
                 panic!("isdirempty: inode read");
             }
             if de.inum != 0 {
@@ -738,6 +743,7 @@ impl ITable {
 }
 
 // Create the path new as a link to the same inode as old.
+#[cfg(target_os = "none")]
 pub fn link(old: &Path, new: &Path) -> Result<(), ()> {
     let (_, ip) = old.namei().ok_or(())?;
     {
@@ -747,7 +753,7 @@ pub fn link(old: &Path, new: &Path) -> Result<(), ()> {
         }
     }
     //todo!()
-        
+
     let (name, dp) = new.nameiparent().ok_or(())?;
     let mut dp_guard = dp.lock();
     if dp.dev != ip.dev || dp_guard.dirlink(name, ip.inum).is_err() {
@@ -762,10 +768,10 @@ pub fn link(old: &Path, new: &Path) -> Result<(), ()> {
     Ok(())
 }
 
+#[cfg(target_os = "none")]
 pub fn unlink(path: &Path) -> Result<(), ()> {
     let de: DirEnt = Default::default();
     let mut off: u32 = 0;
-    
 
     let (name, dp) = path.nameiparent().ok_or(())?;
     let mut dp_guard = dp.lock();
@@ -784,8 +790,14 @@ pub fn unlink(path: &Path) -> Result<(), ()> {
     if ip_guard.itype == IType::Dir && !ip_guard.is_dir_empty() {
         return Err(());
     }
-   
-    dp_guard.write(VirtAddr::Kernel(&de as *const _ as usize), off, size_of::<DirEnt>()).unwrap();
+
+    dp_guard
+        .write(
+            VirtAddr::Kernel(&de as *const _ as usize),
+            off,
+            size_of::<DirEnt>(),
+        )
+        .unwrap();
     if ip_guard.itype == IType::Dir {
         dp_guard.nlink -= 1;
         dp_guard.update();
@@ -797,25 +809,25 @@ pub fn unlink(path: &Path) -> Result<(), ()> {
     Ok(())
 }
 
-
+#[cfg(target_os = "none")]
 pub fn create(path: &Path, type_: IType, major: u16, minor: u16) -> Option<Inode> {
-    let (name, dp)= path.nameiparent()?;
+    let (name, dp) = path.nameiparent()?;
     let ip: Inode;
     {
         let mut dp_guard = dp.lock();
 
         if let Some(ip) = dp_guard.dirlookup(name, None) {
             SleepLock::unlock(dp_guard);
-            let ip_guard = ip.lock(); 
+            let ip_guard = ip.lock();
             match type_ {
                 IType::File if ip_guard.itype == IType::File || ip_guard.itype == IType::Device => {
-                    SleepLock::unlock(ip_guard); 
-                    return Some(ip)
-                },
+                    SleepLock::unlock(ip_guard);
+                    return Some(ip);
+                }
                 _ => return None,
             }
         }
-    
+
         ip = ITABLE.alloc(dp.dev, type_)?;
         let mut ip_guard = ip.lock();
         ip_guard.major = Major::from_u16(major);
@@ -837,7 +849,7 @@ pub fn create(path: &Path, type_: IType, major: u16, minor: u16) -> Option<Inode
             dp_guard.nlink += 1; // for ".."
             dp_guard.update();
         }
-    
+
         ip_guard.nlink = 1;
         ip_guard.update();
     }
@@ -864,6 +876,16 @@ impl AsRef<Path> for str {
 impl Path {
     pub fn new<S: AsRef<str> + ?Sized>(s: &S) -> &Path {
         unsafe { &*(s.as_ref() as *const str as *const Path) }
+    }
+
+    pub fn file_name(&self) -> Option<&str> {
+        if self.inner.ends_with("..") {
+            return None;
+        }
+        match self.inner.rsplit_once('/') {
+            Some((_, file_name)) => Some(file_name),
+            None => Some(&self.inner),
+        }
     }
 
     // Get next path element from path as name &str,

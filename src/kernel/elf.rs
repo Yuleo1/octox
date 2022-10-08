@@ -10,7 +10,6 @@ pub const ELFMAG1: u8 = b'E';
 pub const ELFMAG2: u8 = b'L';
 pub const ELFMAG3: u8 = b'F';
 
-pub const ELF32CL: u8 = 1;
 pub const ELF64CL: u8 = 2;
 
 pub const ELFDATA2LSB: u8 = 1;
@@ -24,9 +23,9 @@ pub struct ElfHdr {
     pub e_type: u16,
     pub e_cpu: u16,
     pub e_version: u32,
-    pub e_entry: u64,
-    pub e_phoff: u64,
-    pub e_shoff: u64,
+    pub e_entry: usize,
+    pub e_phoff: usize,
+    pub e_shoff: usize,
     pub e_flags: u32,
     pub e_ehsize: u16,
     pub e_phsize: u16,
@@ -41,10 +40,10 @@ pub struct ElfHdr {
 pub struct ProgHdr {
     pub p_type: u32,
     pub p_flags: u32,
-    pub p_offset: u64,
-    pub p_vaddr: u64,
-    pub p_paddr: u64,
-    pub p_fsize: u64,
-    pub p_msize: u64,
-    pub p_align: u64,
+    pub p_offset: usize,
+    pub p_vaddr: usize,
+    pub p_paddr: usize,
+    pub p_fsize: usize,
+    pub p_msize: usize,
+    pub p_align: usize,
 }

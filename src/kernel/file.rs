@@ -3,17 +3,17 @@ use crate::array;
 #[cfg(target_os = "none")]
 use crate::fcntl::OMode;
 #[cfg(target_os = "none")]
-use crate::fs::{Path, create, BSIZE, IData, Inode};
+use crate::fs::{create, IData, Inode, Path, BSIZE};
 #[cfg(target_os = "none")]
 use crate::lazy::{SyncLazy, SyncOnceCell};
 #[cfg(target_os = "none")]
 use crate::log::LOG;
 #[cfg(target_os = "none")]
-use crate::param::{NDEV, NFILE, MAXOPBLOCKS};
+use crate::param::{MAXOPBLOCKS, NDEV, NFILE};
 #[cfg(target_os = "none")]
 use crate::pipe::Pipe;
 #[cfg(target_os = "none")]
-use crate::proc::{CPUS, CopyInOut};
+use crate::proc::{CopyInOut, CPUS};
 #[cfg(target_os = "none")]
 use crate::sleeplock::{SleepLock, SleepLockGuard};
 #[cfg(target_os = "none")]
@@ -49,7 +49,7 @@ pub struct File {
 #[derive(Debug)]
 pub enum VFile {
     Device(DNod),
-    Inode(FsFD),
+    Inode(FNod),
     Pipe(Pipe),
     None,
 }
@@ -59,7 +59,7 @@ pub enum VFile {
 #[derive(Debug)]
 pub struct DNod {
     driver: &'static dyn Device,
-    ip: Inode
+    ip: Inode,
 }
 
 // Device functions, map this trait using dyn
@@ -85,15 +85,16 @@ impl Deref for DNod {
     }
 }
 
+// File & directory Node
 #[cfg(target_os = "none")]
 #[derive(Debug)]
-pub struct FsFD {
+pub struct FNod {
     off: UnsafeCell<u32>,
     ip: Inode,
 }
 
 #[cfg(target_os = "none")]
-impl FsFD {
+impl FNod {
     pub fn new(ip: Inode) -> Self {
         Self {
             off: UnsafeCell::new(0),
@@ -125,8 +126,9 @@ impl FsFD {
         while i < n {
             let mut r: usize = 0;
             let mut n1 = n - i;
-            if n1 > max { n1 = max }
-            
+            if n1 > max {
+                n1 = max
+            }
 
             {
                 LOG.begin_op();
@@ -178,13 +180,13 @@ impl VFile {
         let mut stat: Stat = Default::default();
 
         match self {
-            VFile::Device(DNod { driver: _, ref ip }) | VFile::Inode(FsFD { off: _, ref ip }) => {
+            VFile::Device(DNod { driver: _, ref ip }) | VFile::Inode(FNod { off: _, ref ip }) => {
                 {
                     ip.lock().stat(&mut stat);
                 }
                 unsafe { p.either_copyout(addr, &stat) }
-            },
-            _ => Err(())
+            }
+            _ => Err(()),
         }
     }
 }
@@ -208,6 +210,7 @@ impl File {
     }
 }
 
+#[cfg(target_os = "none")]
 impl Deref for File {
     type Target = Arc<VFile>;
     fn deref(&self) -> &Self::Target {
@@ -215,6 +218,7 @@ impl Deref for File {
     }
 }
 
+#[cfg(target_os = "none")]
 impl Drop for File {
     fn drop(&mut self) {
         let f = self.f.take().unwrap();
@@ -224,12 +228,12 @@ impl Drop for File {
 
         if Arc::strong_count(&f) == 2 {
             let mut guard = FTABLE.lock();
-            // drop arc<vfile> in table 
+            // drop arc<vfile> in table
             for ff in guard.iter_mut() {
                 match ff {
                     Some(vff) if Arc::ptr_eq(&f, vff) => {
                         ff.take(); // drop ref in table. ref count = 1;
-                    },
+                    }
                     _ => (),
                 }
             }
@@ -237,12 +241,12 @@ impl Drop for File {
 
         // if ref count == 1
         match Arc::try_unwrap(f) {
-            Ok(VFile::Inode(FsFD { off: _, ip }) | VFile::Device(DNod { driver: _, ip })) => {
+            Ok(VFile::Inode(FNod { off: _, ip }) | VFile::Device(DNod { driver: _, ip })) => {
                 LOG.begin_op();
                 drop(ip);
                 LOG.end_op();
-            },
-            _ => ()
+            }
+            _ => (),
         }
     }
 }
@@ -258,14 +262,9 @@ pub enum FType<'a> {
 impl FTable {
     // Allocate a file structure
     // Must be called inside transaction if FType == FType::Node.
-    pub fn alloc<'a, 'b>(
-        &'a self,
-        opts: OMode,
-        ftype: FType<'b>,
-    ) -> Option<File> {
-
+    pub fn alloc<'a, 'b>(&'a self, opts: OMode, ftype: FType<'b>) -> Option<File> {
         let inner: Arc<VFile> = Arc::new(match ftype {
-            FType::Node(path) => { 
+            FType::Node(path) => {
                 let ip: Inode;
                 let mut ip_guard: SleepLockGuard<'_, IData>;
 
@@ -279,26 +278,27 @@ impl FTable {
                         return None;
                     }
                 }
-                // todo 
+                // todo
                 match ip_guard.itype() {
-                    IType::Device if ip_guard.major() != Major::Invalid && ip_guard.major() != Major::Null => {
+                    IType::Device
+                        if ip_guard.major() != Major::Invalid
+                            && ip_guard.major() != Major::Null =>
+                    {
                         let driver = DEVSW.get(ip_guard.major()).unwrap();
                         SleepLock::unlock(ip_guard);
                         VFile::Device(DNod { driver, ip })
-                    },
+                    }
                     IType::Dir | IType::File => {
                         if opts.is_trunc() && ip_guard.itype() == IType::File {
                             ip_guard.trunc();
                         }
                         SleepLock::unlock(ip_guard);
-                        VFile::Inode(FsFD::new(ip))
-                    },
+                        VFile::Inode(FNod::new(ip))
+                    }
                     _ => return None,
                 }
-            },
-            FType::Pipe(pi) => {
-                VFile::Pipe(pi)
-            },
+            }
+            FType::Pipe(pi) => VFile::Pipe(pi),
         });
 
         let mut guard = self.lock();
@@ -316,13 +316,11 @@ impl FTable {
 
         let f = empty?;
         f.replace(inner);
-        Some(
-            File {
-                f: f.clone(), // ref count = 2
-                readable: opts.is_read(),
-                writable: opts.is_write(),
-            }
-        )
+        Some(File {
+            f: f.clone(), // ref count = 2
+            readable: opts.is_read(),
+            writable: opts.is_write(),
+        })
     }
 }
 
