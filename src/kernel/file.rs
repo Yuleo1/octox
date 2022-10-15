@@ -89,7 +89,7 @@ impl Deref for DNod {
 #[cfg(target_os = "none")]
 #[derive(Debug)]
 pub struct FNod {
-    off: UnsafeCell<u32>,
+    off: UnsafeCell<u32>, // Safety: If inode lock is obtained.
     ip: Inode,
 }
 
