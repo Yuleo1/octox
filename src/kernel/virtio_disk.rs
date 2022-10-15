@@ -1,11 +1,12 @@
 use crate::{
-    bio::Buf,
+    array,
+    bio::Data,
     fs::BSIZE,
     memlayout::VIRTIO0,
     proc::{Process, CPUS, PROCS},
+    sleeplock::SleepLockGuard,
     spinlock::Mutex,
 };
-use alloc::sync::Arc;
 use core::{
     convert::TryInto,
     sync::atomic::{fence, Ordering},
@@ -216,10 +217,9 @@ impl VirtqUsed {
 // track info aboud in-flight operations,
 // for use when completion interrupt arrives.
 // indexed by first descriptor index of chain.
-#[derive(Clone, Copy)]
 #[repr(C)]
 struct Info {
-    buf: Option<&'static Arc<Buf>>,
+    buf: Option<SleepLockGuard<'static, Data>>,
     status: u8,
 }
 
@@ -267,7 +267,7 @@ impl Disk {
             used: VirtqUsed::new(),
             free: [false; NUM],
             used_idx: 0,
-            info: [Info::new(); NUM],
+            info: array![Info::new(); NUM],
             ops: [VirtioBlkReq::new(); NUM],
         }
     }
@@ -414,8 +414,13 @@ impl Disk {
 }
 
 impl Mutex<Disk> {
-    pub fn rw(&self, b: &'static Arc<Buf>, raw_data: *const [u8; BSIZE], write: bool) {
-        let sector = b.ctrl.read().blockno as usize * (BSIZE / 512);
+    pub fn rw(
+        &self,
+        b: Option<SleepLockGuard<'static, Data>>,
+        write: bool,
+    ) -> Option<SleepLockGuard<'static, Data>> {
+        let mut b = b.unwrap();
+        let sector = b.blockno() as usize * (BSIZE / 512);
 
         let mut guard = self.lock();
         let p = CPUS.my_proc().unwrap();
@@ -450,7 +455,7 @@ impl Mutex<Disk> {
         guard.desc[idx[0]].flags = virtq_desc_flags::NEXT;
         guard.desc[idx[0]].next = idx[1].try_into().unwrap();
 
-        guard.desc[idx[1]].addr = raw_data as u64;
+        guard.desc[idx[1]].addr = &b.data as *const _ as u64;
         guard.desc[idx[1]].len = BSIZE.try_into().unwrap();
         guard.desc[idx[1]].flags = if write {
             0
@@ -467,7 +472,7 @@ impl Mutex<Disk> {
         guard.desc[idx[2]].next = 0;
 
         // record struct buf for intr()
-        b.ctrl.write().disk = true;
+        b.disk = true;
         guard.info[idx[0]].buf.replace(b);
 
         // tell the device the first index in our chain of decriptors.
@@ -486,12 +491,12 @@ impl Mutex<Disk> {
         }
 
         // wait for intr() to say request has finished.
-        while b.ctrl.read().disk {
-            guard = p.sleep(Arc::as_ptr(&b) as usize, guard);
+        while let Some(ref b) = guard.info[idx[0]].buf {
+            guard = p.sleep(b as *const _ as usize, guard);
         }
 
-        guard.info[idx[0]].buf.take();
         guard.free_chain(idx[0]);
+        guard.info[idx[0]].buf.take()
     }
 
     pub fn intr(&self) {
@@ -519,9 +524,9 @@ impl Mutex<Disk> {
                 panic!("disk intr status");
             }
 
-            let b = guard.info[id].buf.unwrap();
-            b.ctrl.write().disk = false; // disk is done with buf
-            PROCS.wakeup(Arc::as_ptr(&b) as usize);
+            let b = guard.info[id].buf.as_mut().unwrap();
+            b.disk = false; // disk is done with buf
+            PROCS.wakeup(&b as *const _ as usize);
 
             guard.used_idx += 1;
         }

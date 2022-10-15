@@ -88,10 +88,10 @@ impl Log {
         for tail in 0..self.lh.n {
             let lbuf = BCACHE.read(self.dev, self.start + tail + 1); // read log block
             let mut dbuf = BCACHE.read(self.dev, self.lh.block[tail as usize]); // read dst
-            dbuf.copy_from_slice(lbuf.deref().deref()); // copy block to dst
+            dbuf.copy_from_slice(&lbuf); // copy block to dst
             dbuf.write(); // write dst to disk
             if !recovering {
-                unsafe { dbuf.unpin() };
+                dbuf.unpin();
             }
         }
     }
@@ -205,7 +205,7 @@ impl Mutex<Log> {
             panic!("LOG.write outside of trans");
         }
 
-        let blockno = b.buf().ctrl.read().blockno;
+        let blockno = b.blockno();
         for i in 0..guard.lh.n {
             if guard.lh.block[i as usize] == blockno {
                 // log absorption
@@ -214,7 +214,7 @@ impl Mutex<Log> {
         }
         let n = guard.lh.n as usize;
         guard.lh.block[n] = blockno;
-        unsafe { b.pin() };
+        b.pin();
         guard.lh.n += 1;
     }
 }
