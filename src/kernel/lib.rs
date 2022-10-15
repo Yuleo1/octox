@@ -76,6 +76,8 @@ pub mod syscall;
 #[cfg(target_os = "none")]
 pub mod sysfile;
 #[cfg(target_os = "none")]
+pub mod sysproc;
+#[cfg(target_os = "none")]
 pub mod trampoline;
 #[cfg(target_os = "none")]
 pub mod trap;
