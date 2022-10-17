@@ -32,7 +32,7 @@ use core::ops::Deref;
 #[cfg(target_os = "none")]
 pub static DEVSW: DevSW = DevSW::new();
 #[cfg(target_os = "none")]
-pub static FTABLE: SyncLazy<FTable> = SyncLazy::new(|| todo!());
+pub static FTABLE: SyncLazy<FTable> = SyncLazy::new(|| Mutex::new(array![None; NFILE], "ftable"));
 
 #[cfg(target_os = "none")]
 type FTable = Mutex<[Option<Arc<VFile>>; NFILE]>;
@@ -278,7 +278,7 @@ impl FTable {
                         return None;
                     }
                 }
-                // todo
+                // ?
                 match ip_guard.itype() {
                     IType::Device
                         if ip_guard.major() != Major::Invalid

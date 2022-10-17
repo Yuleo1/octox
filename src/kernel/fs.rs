@@ -1,4 +1,6 @@
 #[cfg(target_os = "none")]
+use crate::array;
+#[cfg(target_os = "none")]
 use crate::bio::BCACHE;
 use crate::file::Major;
 #[cfg(target_os = "none")]
@@ -16,8 +18,11 @@ use crate::{
     lazy::{SyncLazy, SyncOnceCell},
     vm::VirtAddr,
 };
+#[cfg(target_os = "none")]
 use alloc::sync::Arc;
+#[cfg(target_os = "none")]
 use core::mem::size_of;
+#[cfg(target_os = "none")]
 use core::ops::Deref;
 
 // File system implementation. Five layers:
@@ -236,7 +241,8 @@ fn bfree(dev: u32, b: u32) {
 // read or write that inode's ip.valid, ip.size, ip.type, &c.
 
 #[cfg(target_os = "none")]
-pub static ITABLE: SyncLazy<Mutex<[Option<Arc<MInode>>; NINODE]>> = SyncLazy::new(|| todo!());
+pub static ITABLE: SyncLazy<Mutex<[Option<Arc<MInode>>; NINODE]>> =
+    SyncLazy::new(|| Mutex::new(array![None; NINODE], "itable"));
 
 // Inode passed from ITABLE.
 // Wrapper for in-memory inode i.e. MInode
@@ -676,7 +682,6 @@ impl ITable {
     // and return the in-memoroy copy. Does not lock
     // the inode and does not read it from disk.
     fn get(&self, dev: u32, inum: u32) -> Inode {
-        // todo: use Result
         let mut guard = self.lock();
 
         // Is the inode already in the table?
@@ -752,7 +757,7 @@ pub fn link(old: &Path, new: &Path) -> Result<(), ()> {
             return Err(());
         }
     }
-    //todo!()
+    // ?
 
     let (name, dp) = new.nameiparent().ok_or(())?;
     let mut dp_guard = dp.lock();

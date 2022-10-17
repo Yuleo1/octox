@@ -1,7 +1,8 @@
 use crate::defs::{as_bytes, as_bytes_mut};
 use crate::file::File;
-use crate::fs::{self, Inode};
+use crate::fs::{self, Inode, Path};
 use crate::lazy::{SyncLazy, SyncOnceCell};
+use crate::log::LOG;
 use crate::memlayout::{kstack, TRAMPOLINE, TRAPFLAME};
 use crate::spinlock::{Mutex, MutexGuard};
 use crate::swtch::swtch;
@@ -625,7 +626,7 @@ impl Process for Arc<Proc> {
 
         // increment reference counts on open file descripters.
         ndata.ofile.clone_from_slice(&data.ofile);
-        // todo!() cwd idup
+        ndata.cwd = data.cwd.clone();
 
         ndata.name.push_str(&data.name);
 
@@ -651,16 +652,14 @@ impl Process for Arc<Proc> {
         // Close all open files
         let data = unsafe { &mut *self.data.get() };
         for fd in data.ofile.iter_mut() {
-            if let Some(_file) = fd.take() {
-                // file.close() todo
-            }
+            let _file = fd.take(); // fileclose()
         }
 
-        // todo
-        // begin_op();
-        // iput(p->cwd);
-        // end_op();
-        // p->cwd = 0;
+        LOG.begin_op();
+        {
+            let _ip = data.cwd.take(); // put ip
+        }
+        LOG.end_op();
 
         let mut proc_guard;
         unsafe {
@@ -774,34 +773,6 @@ unsafe impl CopyInOut for Arc<Proc> {
         }
     }
 }
-/*
-impl CopyInOut<UVAddr> for Arc<Proc> {
-    fn either_copyout<T: AsBytes>(&self, dst: UVAddr, src: &T) -> Result<(), ()> {
-        let uvm = unsafe { (&mut *self.data.get()).uvm.as_mut().unwrap() };
-        uvm.copyout(dst, src)
-    }
-    fn either_copyin<T: AsBytes + FromBytes>(&self, dst: &mut T, src: UVAddr) -> Result<(), ()> {
-        let uvm = unsafe { (&mut *self.data.get()).uvm.as_mut().unwrap() };
-        uvm.copyin(dst, src)
-    }
-}
-
-impl CopyInOut<KVAddr> for Arc<Proc> {
-    fn either_copyout<T: AsBytes>(&self, dst: KVAddr, src: &T) -> Result<(), ()> {
-        let src = src.as_bytes();
-        let len = src.len();
-        let dst = unsafe { core::slice::from_raw_parts_mut(dst.into_usize() as *mut u8, len) };
-        dst.copy_from_slice(src);
-        Ok(())
-    }
-    fn either_copyin<T: AsBytes + FromBytes>(&self, dst: &mut T, src: KVAddr) -> Result<(), ()> {
-        let dst = dst.as_bytes_mut();
-        let len = dst.len();
-        let src = unsafe { core::slice::from_raw_parts(src.into_usize() as *const u8, len) };
-        dst.copy_from_slice(src);
-        Ok(())
-    }
-}*/
 
 // Set up first user process.
 pub fn user_init() {
@@ -816,11 +787,11 @@ pub fn user_init() {
 
         // prepare for the very first "return" from kernel to user.
         let tf = data.trapframe.unwrap().as_mut();
-        tf.epc = 0;
-        tf.sp = PGSIZE;
+        tf.epc = 0; // user program counter
+        tf.sp = PGSIZE; // user stack pointer
 
         data.name.push_str("initcode");
-        // todo!(); cwd
+        data.cwd = Path::new("/").namei().map(|(_, ip)| ip);
         guard.state = ProcState::RUNNABLE;
     }
 }
@@ -882,6 +853,38 @@ pub fn procdump() {
                 "pid: {:?} state: {:?} name: {:?}",
                 inner.pid, inner.state, data.name
             );
+        }
+    }
+}
+
+// Per-CPU process scheduler.
+// Each CPU calls scheduler() after setting itself up.
+// Scheduler never returns. It loops, doing:
+//  - choose a process to run.
+//  - swtch to start running thet process.
+//  - eventually that process transfers control
+//    via swtch back to the scheduler.
+pub fn scheduler() {
+    let c = unsafe { CPUS.my_cpu() };
+
+    loop {
+        // Avoid deadlock by ensuring thet devices can interrupt.
+        intr_on();
+
+        for p in PROCS.pool.iter() {
+            let mut inner = p.inner.lock();
+            if inner.state == ProcState::RUNNABLE {
+                // Switch to chosen process. It is the process's job
+                // to release its lock and then reacquire it
+                // before jumping back to us.
+                inner.state = ProcState::RUNNING;
+                c.proc.replace(Arc::clone(p));
+                swtch(&mut c.context, &unsafe { &*(p.data.get()) }.context);
+
+                // Process is done running for now.
+                // It should have changed its p->state before coming back.
+                c.proc.take();
+            }
         }
     }
 }

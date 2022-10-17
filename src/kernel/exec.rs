@@ -162,7 +162,7 @@ pub fn exec(path: &Path, argv: [Option<String>; MAXARG]) -> Result<usize, ()> {
             .take_while(|e| e.is_some())
             .filter_map(|s| s)
         {
-            sp -= arg.len(); // todo
+            sp -= arg.len();
             sp -= sp % 16; // riscv sp must be 16-byte aligned
             if sp < stackbase {
                 return Err(());

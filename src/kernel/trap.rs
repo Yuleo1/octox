@@ -7,6 +7,7 @@ use crate::{
         *,
     },
     spinlock::Mutex,
+    syscall::syscall,
     trampoline::trampoline,
     uart::UART,
     virtio_disk::DISK,
@@ -76,7 +77,7 @@ pub extern "C" fn usertrap() -> ! {
             // so don't enable until done with those registers.
             intr_on();
 
-            // todo syscall()
+            syscall();
         }
         Trap::Interrupt(intr)
             if {
