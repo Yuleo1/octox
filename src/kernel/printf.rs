@@ -74,7 +74,7 @@ macro_rules! println {
 
 #[panic_handler]
 fn panic(info: &panic::PanicInfo<'_>) -> ! {
-    PR.panicked.store(true, Ordering::Relaxed);
     crate::println!("{}", info);
+    PR.panicked.store(true, Ordering::Relaxed);
     loop {}
 }

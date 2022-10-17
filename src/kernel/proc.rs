@@ -864,7 +864,7 @@ pub fn procdump() {
 //  - swtch to start running thet process.
 //  - eventually that process transfers control
 //    via swtch back to the scheduler.
-pub fn scheduler() {
+pub fn scheduler() -> ! {
     let c = unsafe { CPUS.my_cpu() };
 
     loop {
