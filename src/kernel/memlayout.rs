@@ -63,8 +63,8 @@ pub const TRAMPOLINE: usize = KVAddr::MAXVA - PGSIZE;
 
 // map kernel stacks beneath the trampoline,
 // each surrounded by invalid guard pages.
-pub const fn kstack(p: usize) -> usize {
-    TRAMPOLINE - ((p + 1) * 5 * PGSIZE)
+pub const fn kstack(p: usize) -> KVAddr {
+    KVAddr::new(TRAMPOLINE - ((p + 1) * 5 * PGSIZE))
 }
 
 // User memory layout.

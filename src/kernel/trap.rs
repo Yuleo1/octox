@@ -11,6 +11,7 @@ use crate::{
     trampoline::trampoline,
     uart::UART,
     virtio_disk::DISK,
+    vm::Addr,
 };
 
 extern "C" {
@@ -132,7 +133,7 @@ pub unsafe extern "C" fn usertrap_ret() -> ! {
     // the process next re-enters the kernel.
     let tf = data.trapframe.unwrap().as_mut();
     tf.kernel_satp = satp::read().bits();
-    tf.kernel_sp = data.kstack + PGSIZE;
+    tf.kernel_sp = data.kstack.into_usize() + PGSIZE;
     tf.kernel_trap = usertrap as usize;
     tf.kernel_hartid = Cpus::cpu_id();
 

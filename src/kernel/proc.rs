@@ -7,7 +7,7 @@ use crate::memlayout::{kstack, TRAMPOLINE, TRAPFLAME};
 use crate::spinlock::{Mutex, MutexGuard};
 use crate::swtch::swtch;
 use crate::trap::usertrap_ret;
-use crate::vm::{Page, PageAllocator, UVAddr, Uvm, VirtAddr, KVM};
+use crate::vm::{Addr, KVAddr, Page, PageAllocator, UVAddr, Uvm, VirtAddr, KVM};
 use crate::{array, print, println};
 use crate::{
     param::*,
@@ -168,7 +168,7 @@ pub struct ProcInner {
 
 // These are private to the process, so lock need not be held.
 pub struct ProcData {
-    pub kstack: usize,                         // Virtual address of kernel stack
+    pub kstack: KVAddr,                        // Virtual address of kernel stack
     pub sz: usize,                             // Size of process memory (bytes)
     pub uvm: Option<Box<Uvm>>,                 // User Memory Page Tabel
     pub trapframe: Option<NonNull<Trapframe>>, // data page for trampline.rs
@@ -414,7 +414,7 @@ impl Procs {
                     // which returns to user space.
                     data.context.write_zero();
                     data.context.ra = fork_ret as usize;
-                    data.context.sp = data.kstack + PGSIZE;
+                    data.context.sp = data.kstack.into_usize() + PGSIZE;
                     return Some((p, lock));
                 }
                 _ => return None,
@@ -814,7 +814,7 @@ impl ProcInner {
 impl ProcData {
     pub fn new() -> Self {
         Self {
-            kstack: 0,
+            kstack: KVAddr::from(0),
             sz: 0,
             uvm: None,
             trapframe: None,

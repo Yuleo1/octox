@@ -26,6 +26,12 @@ pub struct PAddr(usize);
 #[repr(transparent)]
 pub struct KVAddr(usize);
 
+impl KVAddr {
+    pub const fn new(address: usize) -> Self {
+        Self(address)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct UVAddr(usize);
