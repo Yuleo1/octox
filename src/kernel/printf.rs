@@ -7,6 +7,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 pub static PR: Pr = Pr {
     writer: Mutex::new(Writer, "pr"),
     panicked: AtomicBool::new(false),
+    locking: AtomicBool::new(true),
 };
 
 // lock to avoid interleaving concurrent println!'s.
@@ -17,6 +18,7 @@ pub static PR: Pr = Pr {
 pub struct Pr {
     writer: Mutex<Writer>,
     panicked: AtomicBool,
+    locking: AtomicBool,
 }
 
 impl Pr {
@@ -45,7 +47,7 @@ impl fmt::Write for Writer {
 pub fn _print(args: fmt::Arguments<'_>) {
     use fmt::Write;
 
-    if !PR.panicked.load(Ordering::Relaxed) {
+    if PR.locking.load(Ordering::Relaxed) {
         PR.writer.lock().write_fmt(args).expect("_print: error");
     } else {
         // for panic!
@@ -74,6 +76,7 @@ macro_rules! println {
 
 #[panic_handler]
 fn panic(info: &panic::PanicInfo<'_>) -> ! {
+    PR.locking.store(false, Ordering::Relaxed);
     crate::println!("{}", info);
     PR.panicked.store(true, Ordering::Relaxed);
     loop {}
