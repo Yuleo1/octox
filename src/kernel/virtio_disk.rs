@@ -25,13 +25,14 @@ pub static DISK: Mutex<Disk> = Mutex::new(Disk::new(), "virtio_disk");
 enum VirtioMMIO {
     // 0x74726976
     MagicValue = 0x00,
-    // version; 1 is legacy
+    // version; should be 2
     Version = 0x004,
     // device type; 1 is net, 2 is disk
     DeviceId = 0008,
     // 0x554d4552
     VenderId = 0x00c,
     DeviceFeatures = 0x010,
+    DriverFeatures = 0x020,
     // select queue, write-only
     QueueSel = 0x030,
     // max size of current queue, read-only
@@ -303,7 +304,7 @@ impl Disk {
         features &= !(virtio_features::F_ANY_LAYOUT);
         features &= !(virtio_features::RING_F_EVENT_IDX);
         features &= !(virtio_features::RING_F_INDIRECT_DESC);
-        VirtioMMIO::DeviceFeatures.write(features);
+        VirtioMMIO::DriverFeatures.write(features);
 
         // tell device that feature negotiation is complete.
         status |= virtio_status::FEATURES_OK;

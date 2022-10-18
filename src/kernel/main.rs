@@ -6,8 +6,8 @@ extern crate alloc;
 use core::sync::atomic::{AtomicBool, Ordering};
 use kernel::{
     bio, console, kalloc, kmain, plic, print, println,
-    proc::{self, Cpus},
-    trap, vm,
+    proc::{self, scheduler, Cpus},
+    trap, virtio_disk, vm,
 };
 
 static STARTED: AtomicBool = AtomicBool::new(false);
@@ -29,7 +29,7 @@ extern "C" fn main() -> ! {
         plic::init(); // set up interrupt controller
         plic::inithart(); // ask PLIC for device interrupts
         bio::init(); // buffer cache
-        println!("yeah!!!!!");
+        virtio_disk::init(); // emulated hard disk
         STARTED.store(true, Ordering::SeqCst);
     } else {
         while !STARTED.load(Ordering::SeqCst) {}
@@ -38,5 +38,5 @@ extern "C" fn main() -> ! {
         trap::inithart(); // install kernel trap vector
         plic::inithart(); // ask PLIC for device interrups
     }
-    loop {}
+    scheduler()
 }

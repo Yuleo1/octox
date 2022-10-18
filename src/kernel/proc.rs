@@ -441,11 +441,14 @@ impl Procs {
     // Must be called without any "proc" lock.
     pub fn wakeup(&self, chan: usize) {
         for p in self.pool.iter() {
-            if !Arc::ptr_eq(p, CPUS.my_proc().unwrap()) {
-                let mut guard = p.inner.lock();
-                if guard.state == ProcState::SLEEPING && guard.chan == chan {
-                    guard.state = ProcState::RUNNABLE;
+            match CPUS.my_proc() {
+                Some(mp) if !Arc::ptr_eq(p, mp) => {
+                    let mut guard = p.inner.lock();
+                    if guard.state == ProcState::SLEEPING && guard.chan == chan {
+                        guard.state = ProcState::RUNNABLE;
+                    }
                 }
+                _ => (),
             }
         }
     }

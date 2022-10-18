@@ -473,8 +473,8 @@ pub mod registers {
                     1 => Interrupt::SupervisorSoft,
                     4 => Interrupt::UserTimer,
                     5 => Interrupt::SupervisorTimer,
-                    8 => Interrupt::SupervisorExternal,
-                    9 => Interrupt::UserExternal,
+                    8 => Interrupt::UserExternal,
+                    9 => Interrupt::SupervisorExternal,
                     _ => Interrupt::Unknown,
                 }
             }
