@@ -6,10 +6,10 @@ edition = "2021"
 
 [lib]
 name = "kernel"
-path = "kernel/lib.rs"
+path = "src/kernel/lib.rs"
 
 [[bin]]
 name = "kernel"
-path = "kernel/main.rs"
+path = "src/kernel/main.rs"
 
 [dependencies]
