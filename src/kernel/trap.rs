@@ -1,5 +1,6 @@
 use crate::{
-    memlayout::{TRAMPOLINE, TRAPFLAME, UART0_IRQ, VIRTIO0_IRQ},
+    kernelvec::kernelvec,
+    memlayout::{TRAMPOLINE, UART0_IRQ, VIRTIO0_IRQ},
     plic,
     proc::{Cpus, ProcState, Process, CPUS, PROCS},
     riscv::{
@@ -17,7 +18,6 @@ use crate::{
 extern "C" {
     fn uservec();
     fn userret();
-    fn kernelvec();
 }
 
 #[derive(PartialEq)]
@@ -154,8 +154,8 @@ pub unsafe extern "C" fn usertrap_ret() -> ! {
     // switches to the user page table, restores user registers,
     // and switches to user mode with sret.
     let fn_0: usize = TRAMPOLINE + (userret as usize - trampoline as usize);
-    let fn_0: extern "C" fn(usize, usize) -> ! = core::mem::transmute(fn_0);
-    fn_0(TRAPFLAME, satp)
+    let fn_0: extern "C" fn(usize) -> ! = core::mem::transmute(fn_0);
+    fn_0(satp)
 }
 
 // interrupts and exceptions from kernel code go here via kernelvec,
@@ -238,7 +238,6 @@ fn devintr(intr: Interrupt) -> Option<Intr> {
         Interrupt::SupervisorSoft => {
             // software interrupt from a machine-mode timer interrupt,
             // forwarded by timervec in kernelvec.rs.
-
             if unsafe { Cpus::cpu_id() == 0 } {
                 clockintr();
             }

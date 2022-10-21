@@ -1,19 +1,16 @@
+//use crate::trap::kerneltrap;
 use core::arch::asm;
-use core::hint::unreachable_unchecked;
-
-use crate::trap::kerneltrap;
 
 // interrupts and exceptions while in supervisor mode come here.
 // push all registers, call kerneltrap(), restorem return.
+#[naked]
+#[repr(align(16))]
 #[no_mangle]
 pub unsafe extern "C" fn kernelvec() -> ! {
-    asm!(".align 4");
-
-    // make room to save registers.
-    asm!("addi sp, sp, -256");
-
-    // save the registers.
     asm!(
+        // make room to save registers.
+        "addi sp, sp, -256",
+        // save the registers.
         "sd ra, 0(sp)",
         "sd sp, 8(sp)",
         "sd gp, 16(sp)",
@@ -45,13 +42,9 @@ pub unsafe extern "C" fn kernelvec() -> ! {
         "sd t4, 224(sp)",
         "sd t5, 232(sp)",
         "sd t6, 240(sp)",
-    );
-
-    // call the Rust trap handler in trap.rs
-    kerneltrap();
-
-    // restore registers.
-    asm!(
+        // call the Rust trap handler in trap.rs
+        "call kerneltrap",
+        // restore registers.
         "ld ra, 0(sp)",
         "ld sp, 8(sp)",
         "ld gp, 16(sp)",
@@ -83,16 +76,15 @@ pub unsafe extern "C" fn kernelvec() -> ! {
         "ld t4, 224(sp)",
         "ld t5, 232(sp)",
         "ld t6, 240(sp)",
+        "addi sp, sp, 256",
+        // return to whatever we were doing in the kernel.
+        "sret",
+        options(noreturn)
     );
-
-    asm!("addi sp, sp, 256");
-
-    // return to whatever we were doing in the kernel.
-    asm!("sret");
-
-    unreachable_unchecked()
 }
 
+#[naked]
+#[repr(align(16))] // if miss this alignment, a load access fault will occur.
 #[no_mangle]
 pub unsafe extern "C" fn timervec() -> ! {
     // start.rs has set up the memory that mscratch points to:
@@ -108,35 +100,27 @@ pub unsafe extern "C" fn timervec() -> ! {
     // used for processing in this scratch space.
     // a0 saved in mscrach, a1 ~ a3 saved in scratch space.
     //loop {}
-    asm!(".align 4"); // if miss this alignment, a load access fault will occur.
     asm!(
         "csrrw a0, mscratch, a0",
         "sd a1, 0(a0)",
         "sd a2, 8(a0)",
         "sd a3, 16(a0)",
-    );
-
-    // schedule the next timer interrupt
-    // by adding interval to mtimecmp.
-    asm!(
+        // schedule the next timer interrupt
+        // by adding interval to mtimecmp.
         "ld a1, 24(a0)", // CLINT_MTIMECMP(hartid) contents
         "ld a2, 32(a0)", // interval
         "ld a3, 0(a1)",
         "add a3, a3, a2",
         "sd a3, 0(a1)",
-    );
-
-    // raise a supervisor software interrupt.
-    asm!("li a1, 2", "csrw sip, a1",);
-
-    // restore and return
-    asm!(
+        // raise a supervisor software interrupt.
+        "li a1, 2",
+        "csrw sip, a1",
+        // restore and return
         "ld a3, 16(a0)",
         "ld a2, 8(a0)",
         "ld a1, 0(a0)",
         "csrrw a0, mscratch, a0",
         "mret",
+        options(noreturn)
     );
-
-    unreachable_unchecked();
 }

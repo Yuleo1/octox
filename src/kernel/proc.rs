@@ -372,7 +372,7 @@ impl Procs {
         use crate::vm::Stack;
         for (p, _) in self.pool.iter().enumerate() {
             let pa = Stack::try_new_zeroed().unwrap();
-            let va = kstack(p).into();
+            let va = kstack(p);
             KVM.get_mut()
                 .unwrap()
                 .map(va, pa.into(), PGSIZE, PTE_R | PTE_W);

@@ -6,6 +6,9 @@
 #![feature(negative_impls)]
 #![feature(associated_type_bounds)]
 #![feature(never_type)]
+#![feature(naked_functions)]
+#![feature(asm_const)]
+#![feature(fn_align)]
 
 extern crate alloc;
 
