@@ -25,6 +25,10 @@ name = "init"
 path = "init.rs"
 
 [[bin]]
+name = "initcode"
+path = "initcode.rs"
+
+[[bin]]
 name = "kill"
 path = "kill.rs"
 
@@ -54,6 +58,6 @@ path = "sh.rs"
 
 [[bin]]
 name = "wc"
-path = "ec.rs"
+path = "wc.rs"
 
 [dependencies]
