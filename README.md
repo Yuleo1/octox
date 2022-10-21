@@ -13,14 +13,9 @@ octox loosely follows the structure and style of xv6, but is implemented in pure
 
 ### Build and Run
 
-* Add target(`riscv64gc-unknown-none-elf`)
-  ```
-  git clone https://github.com/o8vm/octox.git
-  cd octox
-  rustup target add riscv64gc-unknown-none-elf
-  ```
-* Build: run `cargo build`.
-* Run: run `cargo run`, then qemu will boot octox.  
+* Clone this project & enter: `git clone ... && cd octox`
+* Build: `cargo build`.
+* Run: `cargo run`, then qemu will boot octox.  
   To exit, press `Ctrl+a` and `x`.
 
 ## License
