@@ -1,6 +1,6 @@
 # octox 
 
-octox is a re-implementation of xv6.   
+octox is a Unix-like operating system inspired by xv6-riscv.  
 octox loosely follows the structure and style of xv6, but is implemented in pure Rust.
 
 ## Getting Started
