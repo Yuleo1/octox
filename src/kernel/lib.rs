@@ -77,6 +77,8 @@ pub mod sync;
 #[cfg(target_os = "none")]
 pub mod syscall;
 #[cfg(target_os = "none")]
+pub mod sysctbl;
+#[cfg(target_os = "none")]
 pub mod sysfile;
 #[cfg(target_os = "none")]
 pub mod sysproc;

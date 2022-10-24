@@ -34,7 +34,7 @@ path = "kill.rs"
 
 [[bin]]
 name = "ln"
-pathe = "ln.rs"
+path = "ln.rs"
 
 [[bin]]
 name = "ls"

@@ -1,6 +1,21 @@
+#![feature(variant_count)]
 use std::env;
+use std::fs::File;
+use std::io::Write;
 use std::path::Path;
 use std::process::Command;
+
+// get enum SysCallNum
+include!("src/kernel/sysctbl.rs");
+
+impl SysCallNum {
+    fn into_enum_iter() -> std::vec::IntoIter<SysCallNum> {
+        (0..core::mem::variant_count::<SysCallNum>())
+            .map(|i| SysCallNum::from_usize(i + 1).unwrap())
+            .collect::<Vec<SysCallNum>>()
+            .into_iter()
+    }
+}
 
 fn main() {
     let cargo_path = env::var("CARGO").expect("Missing CARGO environment variable");
@@ -21,6 +36,57 @@ fn main() {
     build_subproject(&mkfs_dir, &target_dir, cargo, &mkfs_target_triple);
 
     // Build user programs: target = riscv64gc-unknown-none-elf
+    // generate sysctbl.rs & usys.rs
+    // create sysctbl.rs
+    let mut sysctbl_rs = File::create(manifest_dir.join("src").join("user").join("sysctbl.rs"))
+        .expect("couldn't create src/user/sysctbl.rs");
+    sysctbl_rs
+        .write_all(
+            concat!(
+                "// Created by build.rs\n\n\n",
+                include_str!("src/kernel/sysctbl.rs")
+            )
+            .as_bytes(),
+        )
+        .expect("src/user/sysctbl.rs: write error");
+    // create usys.rs
+    let mut usys_rs = File::create(manifest_dir.join("src").join("user").join("usys.rs"))
+        .expect("cloudn't create src/user/usys.rs");
+    usys_rs
+        .write_all(
+            "// Created by build.rs\n\
+            use crate::sysctbl::*;\n\
+            use core::arch::asm\n\n\n"
+                .as_bytes(),
+        )
+        .expect("src/user/usys.rs: write error");
+    for syscall in SysCallNum::into_enum_iter() {
+        let fn_name = format!("{:?}", syscall)
+            .strip_prefix("Sys")
+            .unwrap()
+            .to_lowercase();
+        usys_rs
+            .write_fmt(format_args!(
+                r#"#[naked]
+#[no_mangle]
+pub fn {} -> ! {{
+    unsafe {{
+        asm!(
+            "li a7, {{syscall}}",
+            "ecall",
+            "ret",
+            syscall = const SysCallNum::{:?} as usize,
+            optoins(noreturn),
+        );
+    }}
+}}
+
+"#,
+                fn_name, syscall
+            ))
+            .expect("src/user/usys.rs: write error");
+    }
+
     //let target_triple = env::var("TARGET").expect("missing target triple");
     //let user_dir = manifest_dir.join("user");
     //build_subproject(&user_dir, &target_dir, cargo, &target_triple);
