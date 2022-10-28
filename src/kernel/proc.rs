@@ -7,7 +7,7 @@ use crate::memlayout::{kstack, TRAMPOLINE, TRAPFLAME};
 use crate::spinlock::{Mutex, MutexGuard};
 use crate::swtch::swtch;
 use crate::trap::usertrap_ret;
-use crate::vm::{Addr, KVAddr, Page, PageAllocator, UVAddr, Uvm, VirtAddr, KVM};
+use crate::vm::{Addr, KVAddr, PageAllocator, UVAddr, Uvm, VirtAddr, KVM};
 use crate::{array, print, println};
 use crate::{
     param::*,
@@ -19,7 +19,7 @@ use alloc::vec::Vec;
 use alloc::{boxed::Box, sync::Arc};
 use core::arch::asm;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use core::{cell::UnsafeCell, ops::Drop, ptr::NonNull};
+use core::{cell::UnsafeCell, ops::Drop};
 
 pub static CPUS: Cpus = Cpus::new();
 pub static PROCS: SyncLazy<Procs> = SyncLazy::new(|| Procs::new());
@@ -53,6 +53,7 @@ unsafe impl Sync for Cpus {}
 // Per-CPU state
 pub struct Cpu {
     pub proc: Option<Arc<Proc>>, // The process running on this cpu, or None.
+    proc_lock: Option<MutexGuard<'static, ProcInner>>,
     pub context: Context,        // swtch() here to enter scheduler().
     pub noff: UnsafeCell<isize>, // Depth of push_off()
     pub intena: bool,            // Were interrupts enabled before push_off()?
@@ -78,7 +79,7 @@ pub struct IntrLock<'a> {
 // the trapframe includes callee-saved user registers like s0-s11
 // because the return-to-user path via usertrap_ret() doesn't return
 // throgh the entire kernel call stack.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 #[repr(C)]
 pub struct Trapframe {
     /*   0 */ pub kernel_satp: usize, // kernel page table
@@ -129,7 +130,7 @@ unsafe impl Sync for Procs {}
 pub struct Proc {
     // lock must be held when using inner data:
     pub inner: Mutex<ProcInner>,
-    // lock must be held when using this:
+    // wait_lock must be held when using this:
     pub parent: UnsafeCell<Option<Arc<Proc>>>,
     // these are private to the process, so lock need not be held.
     pub data: UnsafeCell<ProcData>,
@@ -168,14 +169,14 @@ pub struct ProcInner {
 
 // These are private to the process, so lock need not be held.
 pub struct ProcData {
-    pub kstack: KVAddr,                        // Virtual address of kernel stack
-    pub sz: usize,                             // Size of process memory (bytes)
-    pub uvm: Option<Box<Uvm>>,                 // User Memory Page Tabel
-    pub trapframe: Option<NonNull<Trapframe>>, // data page for trampline.rs
-    pub context: Context,                      // swtch() here to run process
-    pub name: String,                          // Process name (debuggig)
-    pub ofile: [Option<File>; NOFILE],         // Open files
-    pub cwd: Option<Inode>,                    // Current directory
+    pub kstack: KVAddr,                    // Virtual address of kernel stack
+    pub sz: usize,                         // Size of process memory (bytes)
+    pub uvm: Option<Box<Uvm>>,             // User Memory Page Tabel
+    pub trapframe: Option<Box<Trapframe>>, // data page for trampline.rs
+    pub context: Context,                  // swtch() here to run process
+    pub name: String,                      // Process name (debuggig)
+    pub ofile: [Option<File>; NOFILE],     // Open files
+    pub cwd: Option<Inode>,                // Current directory
 }
 unsafe impl Sync for ProcData {}
 unsafe impl Send for ProcData {}
@@ -295,6 +296,7 @@ impl Cpu {
     const fn new() -> Self {
         Self {
             proc: None,
+            proc_lock: None,
             context: Context::new(),
             noff: UnsafeCell::new(0),
             intena: false,
@@ -393,10 +395,8 @@ impl Procs {
 
                     let data = unsafe { &mut (*p.data.get()) };
                     // Allocate a trapframe page.
-                    if let Some(tf) =
-                        Page::try_new_zeroed().and_then(|t| NonNull::new(t as *mut Trapframe))
-                    {
-                        data.trapframe.replace(tf);
+                    if let Ok(tf) = Box::<Trapframe>::try_new_zeroed() {
+                        data.trapframe.replace(unsafe { tf.assume_init() });
                     } else {
                         p.free_proc(lock);
                         return None;
@@ -493,6 +493,12 @@ impl Proc {
     pub fn pid(&self) -> usize {
         self.inner.lock().pid.0
     }
+    pub fn data(&self) -> &ProcData {
+        unsafe { &*(self.data.get()) }
+    }
+    pub fn data_mut(&self) -> &mut ProcData {
+        unsafe { &mut *(self.data.get()) }
+    }
 }
 
 impl Process for Arc<Proc> {
@@ -501,9 +507,7 @@ impl Process for Arc<Proc> {
     // "proc" lock must be held.
     fn free_proc<'a>(&self, mut guard: MutexGuard<'a, ProcInner>) {
         let mut data = unsafe { &mut (*self.data.get()) };
-        if let Some(tf) = data.trapframe.take() {
-            unsafe { drop(Box::from_raw(tf.as_ptr())) }
-        }
+        data.trapframe.take(); // drop Box<Trapframe>
         if let Some(mut uvm) = data.uvm.take() {
             uvm.proc_uvmfree(data.sz);
         }
@@ -531,7 +535,7 @@ impl Process for Arc<Proc> {
         // to/from user space, so not PTE_U.
         if uvm
             .mappages(
-                TRAMPOLINE.into(),
+                UVAddr::from(TRAMPOLINE),
                 (trampoline as usize).into(),
                 PGSIZE,
                 PTE_R | PTE_X,
@@ -545,8 +549,11 @@ impl Process for Arc<Proc> {
         // map the trapframe just bellow TRAMPOLINE, for trampoline.rs
         if uvm
             .mappages(
-                TRAPFLAME.into(),
-                (unsafe { (*self.data.get()).trapframe.unwrap().as_ptr() as usize }).into(),
+                UVAddr::from(TRAPFLAME),
+                (unsafe {
+                    &**((*self.data.get()).trapframe.as_mut().unwrap()) as *const _ as usize
+                })
+                .into(),
                 PGSIZE,
                 PTE_R | PTE_W,
             )
@@ -620,9 +627,9 @@ impl Process for Arc<Proc> {
         ndata.sz = data.sz;
 
         // Copy saved user registers.
-        let tf = unsafe { data.trapframe.unwrap().as_mut() };
-        let ntf = unsafe { ndata.trapframe.unwrap().as_mut() };
-        *ntf = *tf;
+        let tf = data.trapframe.as_ref().unwrap();
+        let ntf = ndata.trapframe.as_mut().unwrap();
+        ntf.clone_from(tf);
 
         // Cause fork to return 0 in the child
         ntf.a0 = 0;
@@ -781,22 +788,21 @@ unsafe impl CopyInOut for Arc<Proc> {
 pub fn user_init() {
     let (p, ref mut guard) = PROCS.alloc_proc().unwrap();
     INITPROC.set(p.clone()).unwrap();
-    unsafe {
-        let data = &mut *p.data.get();
-        // allocate one user page and copy init's instructions
-        // and data into it.
-        data.uvm.as_mut().unwrap().init(&INITCODE);
-        data.sz = PGSIZE;
 
-        // prepare for the very first "return" from kernel to user.
-        let tf = data.trapframe.unwrap().as_mut();
-        tf.epc = 0; // user program counter
-        tf.sp = PGSIZE; // user stack pointer
+    let data = unsafe { &mut *p.data.get() };
+    // allocate one user page and copy init's instructions
+    // and data into it.
+    data.uvm.as_mut().unwrap().init(&INITCODE);
+    data.sz = PGSIZE;
 
-        data.name.push_str("initcode");
-        data.cwd = Path::new("/").namei().map(|(_, ip)| ip);
-        guard.state = ProcState::RUNNABLE;
-    }
+    // prepare for the very first "return" from kernel to user.
+    let tf = data.trapframe.as_mut().unwrap();
+    tf.epc = 0; // user program counter
+    tf.sp = PGSIZE; // user stack pointer
+
+    data.name.push_str("initcode");
+    data.cwd = Path::new("/").namei().map(|(_, ip)| ip);
+    guard.state = ProcState::RUNNABLE;
 }
 
 impl ProcInner {
@@ -832,7 +838,7 @@ pub unsafe extern "C" fn fork_ret() -> ! {
     static mut FIRST: bool = true;
 
     // still holding "proc" lock from scheduler.
-    CPUS.my_proc().unwrap().inner.force_unlock();
+    drop(CPUS.my_cpu().proc_lock.take());
 
     if FIRST {
         // File system initialization must be run in the context of a
@@ -882,6 +888,7 @@ pub fn scheduler() -> ! {
                 // before jumping back to us.
                 inner.state = ProcState::RUNNING;
                 c.proc.replace(Arc::clone(p));
+                c.proc_lock.replace(inner);
                 swtch(&mut c.context, &unsafe { &*(p.data.get()) }.context);
 
                 // Process is done running for now.

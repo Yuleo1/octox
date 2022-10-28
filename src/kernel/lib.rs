@@ -9,7 +9,7 @@
 #![feature(naked_functions)]
 #![feature(asm_const)]
 #![feature(fn_align)]
-
+#![feature(variant_count)]
 extern crate alloc;
 
 #[cfg(target_os = "none")]
@@ -76,12 +76,6 @@ pub mod swtch;
 pub mod sync;
 #[cfg(target_os = "none")]
 pub mod syscall;
-#[cfg(target_os = "none")]
-pub mod sysctbl;
-#[cfg(target_os = "none")]
-pub mod sysfile;
-#[cfg(target_os = "none")]
-pub mod sysproc;
 #[cfg(target_os = "none")]
 pub mod trampoline;
 #[cfg(target_os = "none")]

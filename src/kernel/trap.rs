@@ -56,7 +56,7 @@ pub extern "C" fn usertrap() -> ! {
 
     let p = CPUS.my_proc().unwrap();
     let data = unsafe { &mut (*p.data.get()) };
-    let tf = unsafe { data.trapframe.unwrap().as_mut() };
+    let tf = data.trapframe.as_mut().unwrap();
 
     // save user program counter
     tf.epc = sepc::read();
@@ -131,7 +131,7 @@ pub unsafe extern "C" fn usertrap_ret() -> ! {
 
     // set up trapframe values that uservec will need when
     // the process next re-enters the kernel.
-    let tf = data.trapframe.unwrap().as_mut();
+    let tf = data.trapframe.as_mut().unwrap();
     tf.kernel_satp = satp::read().bits();
     tf.kernel_sp = data.kstack.into_usize() + PGSIZE;
     tf.kernel_trap = usertrap as usize;

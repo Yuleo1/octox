@@ -8,56 +8,56 @@ edition = "2018"
 name = "ulib"
 path = "lib.rs"
 
-[[bin]]
-name = "cat"
-path = "cat.rs"
-
-[[bin]]
-name = "echo"
-path = "echo.rs"
-
-[[bin]]
-name = "grep"
-path = "grep.rs"
-
-[[bin]]
-name = "init"
-path = "init.rs"
-
-[[bin]]
-name = "initcode"
-path = "initcode.rs"
-
-[[bin]]
-name = "kill"
-path = "kill.rs"
-
-[[bin]]
-name = "ln"
-path = "ln.rs"
-
-[[bin]]
-name = "ls"
-path = "ls.rs"
-
-[[bin]]
-name = "mkdir"
-path = "mkdir.rs"
-
-[[bin]]
-name = "printf"
-path = "printf.rs"
-
-[[bin]]
-name = "rm"
-path = "rm.rs"
-
-[[bin]]
-name = "sh"
-path = "sh.rs"
-
-[[bin]]
-name = "wc"
-path = "wc.rs"
+#[[bin]]
+#name = "cat"
+#path = "cat.rs"
+#
+#[[bin]]
+#name = "echo"
+#path = "echo.rs"
+#
+#[[bin]]
+#name = "grep"
+#path = "grep.rs"
+#
+#[[bin]]
+#name = "init"
+#path = "init.rs"
+#
+#[[bin]]
+#name = "initcode"
+#path = "initcode.rs"
+#
+#[[bin]]
+#name = "kill"
+#path = "kill.rs"
+#
+#[[bin]]
+#name = "ln"
+#path = "ln.rs"
+#
+#[[bin]]
+#name = "ls"
+#path = "ls.rs"
+#
+#[[bin]]
+#name = "mkdir"
+#path = "mkdir.rs"
+#
+#[[bin]]
+#name = "printf"
+#path = "printf.rs"
+#
+#[[bin]]
+#name = "rm"
+#path = "rm.rs"
+#
+#[[bin]]
+#name = "sh"
+#path = "sh.rs"
+#
+#[[bin]]
+#name = "wc"
+#path = "wc.rs"
 
 [dependencies]

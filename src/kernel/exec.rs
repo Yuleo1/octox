@@ -139,7 +139,7 @@ pub fn exec(path: &Path, argv: [Option<String>; MAXARG]) -> Result<usize, ()> {
         res?;
         let p = CPUS.my_proc().unwrap();
         let proc_data = unsafe { &mut *p.data.get() };
-        let tf = unsafe { proc_data.trapframe.unwrap().as_mut() };
+        let tf = proc_data.trapframe.as_mut().unwrap();
         let oldsz = unsafe { (&*p.data.get()).sz };
 
         // Allocate two pages at the next page boundary.
@@ -180,12 +180,12 @@ pub fn exec(path: &Path, argv: [Option<String>; MAXARG]) -> Result<usize, ()> {
         if sp < stackbase {
             return Err(());
         }
-        unsafe { uvm.as_mut().unwrap().copyout(From::from(sp), &ustack) }?;
+        unsafe { uvm.as_mut().unwrap().copyout(UVAddr::from(sp), &ustack) }?;
 
         // arguments to user main(argc, argv)
         // argc is returned via the system call return
         // value, which goes in a0.
-        unsafe { (&*p.data.get()).trapframe.unwrap().as_mut() }.a1 = sp;
+        unsafe { &mut *p.data.get() }.trapframe.as_mut().unwrap().a1 = sp;
 
         // Save program name for debugging.
         match path.file_name() {

@@ -1,4 +1,6 @@
 /target
 Cargo.lock
 /src/user/usys.rs
-/src/user/sysctbl.rs
+/src/user/.config/
+/src/user/rust-toolchain.toml
+/src/user/target/

@@ -449,19 +449,21 @@ impl Uvm {
     // Load the user initcode into address 0 of pagetable,
     // for the very first process.
     // size must be less than a page.
-    pub unsafe fn init(&mut self, src: &[u8]) {
+    pub fn init(&mut self, src: &[u8]) {
         if src.len() > PGSIZE {
             panic!("inituvm: more than a page");
         }
-        let mem = Box::into_raw(Box::<Page>::new_zeroed().assume_init());
-        self.mappages(
-            0.into(),
-            (mem as usize).into(),
-            PGSIZE,
-            PTE_W | PTE_R | PTE_X | PTE_U,
-        )
-        .unwrap();
-        ptr::copy_nonoverlapping(src.as_ptr(), mem as *mut u8, src.len());
+        unsafe {
+            let mem = Box::into_raw(Box::<Page>::new_zeroed().assume_init());
+            self.mappages(
+                0.into(),
+                (mem as usize).into(),
+                PGSIZE,
+                PTE_W | PTE_R | PTE_X | PTE_U,
+            )
+            .unwrap();
+            ptr::copy_nonoverlapping(src.as_ptr(), mem as *mut u8, src.len());
+        }
     }
 
     // Allocate PTEs and physical memory to grow process from oldsz to
