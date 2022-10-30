@@ -1,8 +1,8 @@
 use crate::defs::{as_bytes, as_bytes_mut};
-use crate::lazy::SyncOnceCell;
 use crate::memlayout::{KERNBASE, PHYSTOP, PLIC, TRAMPOLINE, TRAPFLAME, UART0, VIRTIO0};
 use crate::proc::PROCS;
 use crate::riscv::{pgroundup, pteflags::*, registers::satp, sfence_vma, PGSHIFT, PGSIZE};
+use crate::sync::OnceLock;
 use alloc::boxed::Box;
 use core::cmp::{Ord, PartialEq, PartialOrd};
 use core::convert::From;
@@ -16,7 +16,7 @@ extern "C" {
     fn etext();
 }
 
-pub static mut KVM: SyncOnceCell<Kvm> = SyncOnceCell::new();
+pub static mut KVM: OnceLock<Kvm> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]

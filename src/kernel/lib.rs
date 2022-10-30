@@ -5,7 +5,6 @@
 #![feature(allocator_api)]
 #![feature(negative_impls)]
 #![feature(associated_type_bounds)]
-#![feature(never_type)]
 #![feature(naked_functions)]
 #![feature(asm_const)]
 #![feature(fn_align)]
@@ -57,8 +56,6 @@ pub mod file;
 pub mod fs;
 #[cfg(target_os = "none")]
 pub mod kalloc;
-#[cfg(target_os = "none")]
-pub mod lazy;
 #[cfg(target_os = "none")]
 pub mod list;
 #[cfg(target_os = "none")]

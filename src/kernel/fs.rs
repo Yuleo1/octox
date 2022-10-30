@@ -15,7 +15,7 @@ use crate::spinlock::Mutex;
 use crate::stat::{IType, Stat};
 #[cfg(target_os = "none")]
 use crate::{
-    lazy::{SyncLazy, SyncOnceCell},
+    sync::{LazyLock, OnceLock},
     vm::VirtAddr,
 };
 #[cfg(target_os = "none")]
@@ -42,7 +42,7 @@ pub const BSIZE: usize = 1024; // block size
 // there should be one superblock per disk device, but we run with
 // only one device
 #[cfg(target_os = "none")]
-pub static SB: SyncOnceCell<SuperBlock> = SyncOnceCell::new();
+pub static SB: OnceLock<SuperBlock> = OnceLock::new();
 
 // Disk layout:
 // [ root block | super block | log | inode blocks |
@@ -241,8 +241,8 @@ fn bfree(dev: u32, b: u32) {
 // read or write that inode's ip.valid, ip.size, ip.type, &c.
 
 #[cfg(target_os = "none")]
-pub static ITABLE: SyncLazy<Mutex<[Option<Arc<MInode>>; NINODE]>> =
-    SyncLazy::new(|| Mutex::new(array![None; NINODE], "itable"));
+pub static ITABLE: LazyLock<Mutex<[Option<Arc<MInode>>; NINODE]>> =
+    LazyLock::new(|| Mutex::new(array![None; NINODE], "itable"));
 
 // Inode passed from ITABLE.
 // Wrapper for in-memory inode i.e. MInode

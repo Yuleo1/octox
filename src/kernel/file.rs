@@ -5,8 +5,6 @@ use crate::fcntl::OMode;
 #[cfg(target_os = "none")]
 use crate::fs::{create, IData, Inode, Path, BSIZE};
 #[cfg(target_os = "none")]
-use crate::lazy::{SyncLazy, SyncOnceCell};
-#[cfg(target_os = "none")]
 use crate::log::LOG;
 #[cfg(target_os = "none")]
 use crate::param::{MAXOPBLOCKS, NDEV, NFILE};
@@ -21,6 +19,8 @@ use crate::spinlock::Mutex;
 #[cfg(target_os = "none")]
 use crate::stat::{IType, Stat};
 #[cfg(target_os = "none")]
+use crate::sync::{LazyLock, OnceLock};
+#[cfg(target_os = "none")]
 use crate::vm::VirtAddr;
 #[cfg(target_os = "none")]
 use alloc::sync::Arc;
@@ -32,7 +32,7 @@ use core::ops::Deref;
 #[cfg(target_os = "none")]
 pub static DEVSW: DevSW = DevSW::new();
 #[cfg(target_os = "none")]
-pub static FTABLE: SyncLazy<FTable> = SyncLazy::new(|| Mutex::new(array![None; NFILE], "ftable"));
+pub static FTABLE: LazyLock<FTable> = LazyLock::new(|| Mutex::new(array![None; NFILE], "ftable"));
 
 #[cfg(target_os = "none")]
 type FTable = Mutex<[Option<Arc<VFile>>; NFILE]>;
@@ -326,7 +326,7 @@ impl FTable {
 
 #[cfg(target_os = "none")]
 pub struct DevSW {
-    table: [SyncOnceCell<&'static dyn Device>; NDEV],
+    table: [OnceLock<&'static dyn Device>; NDEV],
 }
 
 #[cfg(target_os = "none")]
@@ -351,7 +351,7 @@ impl core::fmt::Debug for DevSW {
 impl DevSW {
     pub const fn new() -> Self {
         Self {
-            table: array![SyncOnceCell::new(); NDEV],
+            table: array![OnceLock::new(); NDEV],
         }
     }
     pub fn set(

@@ -1,12 +1,191 @@
-use core::cell::Cell;
+use core::cell::{Cell, UnsafeCell};
 use core::marker;
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use core::mem::MaybeUninit;
+use core::ops::Deref;
+use core::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::proc::CPUS;
+pub struct OnceLock<T> {
+    once: Once,
+    value: UnsafeCell<MaybeUninit<T>>,
+    _marker: marker::PhantomData<T>,
+}
+unsafe impl<T: Sync + Send> Sync for OnceLock<T> {}
+unsafe impl<T: Send> Send for OnceLock<T> {}
 
+impl<T: Clone> Clone for OnceLock<T> {
+    fn clone(&self) -> OnceLock<T> {
+        let cell = Self::new();
+        if let Some(value) = self.get() {
+            match cell.set(value.clone()) {
+                Ok(()) => (),
+                Err(_) => unreachable!(),
+            }
+        }
+        cell
+    }
+}
+
+impl<T> From<T> for OnceLock<T> {
+    fn from(value: T) -> Self {
+        let cell = Self::new();
+        match cell.set(value) {
+            Ok(()) => cell,
+            Err(_) => unreachable!(),
+        }
+    }
+}
+
+impl<T: PartialEq> PartialEq for OnceLock<T> {
+    fn eq(&self, other: &OnceLock<T>) -> bool {
+        self.get() == other.get()
+    }
+}
+
+impl<T: Eq> Eq for OnceLock<T> {}
+
+impl<T> OnceLock<T> {
+    pub const fn new() -> OnceLock<T> {
+        OnceLock {
+            once: Once::new(),
+            value: UnsafeCell::new(MaybeUninit::uninit()),
+            _marker: marker::PhantomData,
+        }
+    }
+    pub fn get(&self) -> Option<&T> {
+        if self.is_initialized() {
+            Some(unsafe { self.get_unchecked() })
+        } else {
+            None
+        }
+    }
+    pub fn get_mut(&mut self) -> Option<&mut T> {
+        if self.is_initialized() {
+            Some(unsafe { self.get_unchecked_mut() })
+        } else {
+            None
+        }
+    }
+    pub fn set(&self, value: T) -> Result<(), T> {
+        let mut value = Some(value);
+        self.get_or_init(|| value.take().unwrap());
+        match value {
+            None => Ok(()),
+            Some(value) => Err(value),
+        }
+    }
+    pub fn get_or_init<F>(&self, f: F) -> &T
+    where
+        F: FnOnce() -> T,
+    {
+        match self.get_or_try_init(|| Ok::<T, ()>(f())) {
+            Ok(val) => val,
+            _ => unreachable!(),
+        }
+    }
+    pub fn get_or_try_init<F, E>(&self, f: F) -> Result<&T, E>
+    where
+        F: FnOnce() -> Result<T, E>,
+    {
+        if let Some(value) = self.get() {
+            return Ok(value);
+        }
+        self.initialize(f)?;
+
+        debug_assert!(self.is_initialized());
+
+        Ok(unsafe { self.get_unchecked() })
+    }
+
+    pub fn into_inner(mut self) -> Option<T> {
+        self.take()
+    }
+
+    pub fn take(&mut self) -> Option<T> {
+        if self.is_initialized() {
+            self.once = Once::new();
+            unsafe { Some((&mut *self.value.get()).assume_init_read()) }
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    fn is_initialized(&self) -> bool {
+        self.once.is_completed()
+    }
+
+    #[cold]
+    fn initialize<F, E>(&self, f: F) -> Result<(), E>
+    where
+        F: FnOnce() -> Result<T, E>,
+    {
+        let mut res: Result<(), E> = Ok(());
+        let slot = &self.value;
+        self.once.call_once_force(|p| match f() {
+            Ok(value) => {
+                unsafe { (&mut *slot.get()).write(value) };
+            }
+            Err(e) => {
+                res = Err(e);
+                p.poison();
+            }
+        });
+        res
+    }
+
+    unsafe fn get_unchecked(&self) -> &T {
+        debug_assert!(self.is_initialized());
+        (&*self.value.get()).assume_init_ref()
+    }
+
+    unsafe fn get_unchecked_mut(&mut self) -> &mut T {
+        debug_assert!(self.is_initialized());
+        (&mut *self.value.get()).assume_init_mut()
+    }
+}
+
+impl<T> Drop for OnceLock<T> {
+    fn drop(&mut self) {
+        if self.is_initialized() {
+            unsafe { (&mut *self.value.get()).assume_init_drop() };
+        }
+    }
+}
+
+pub struct LazyLock<T, F = fn() -> T> {
+    cell: OnceLock<T>,
+    init: Cell<Option<F>>,
+}
+
+unsafe impl<T, F: Send> Sync for LazyLock<T, F> where OnceLock<T>: Sync {}
+// auto-derived Send impl is OK.
+
+impl<T, F> LazyLock<T, F> {
+    pub const fn new(init: F) -> Self {
+        Self {
+            cell: OnceLock::new(),
+            init: Cell::new(Some(init)),
+        }
+    }
+}
+
+impl<T, F: FnOnce() -> T> LazyLock<T, F> {
+    pub fn force(this: &LazyLock<T, F>) -> &T {
+        this.cell.get_or_init(|| match this.init.take() {
+            Some(f) => f(),
+            None => panic!("Lazy instance has previously been poisoned"),
+        })
+    }
+}
+
+impl<T, F: FnOnce() -> T> Deref for LazyLock<T, F> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        LazyLock::force(self)
+    }
+}
 pub struct Once {
-    state_and_queue: AtomicUsize,
-    _marker: marker::PhantomData<*const Waiter>,
+    state: AtomicUsize,
 }
 
 unsafe impl Sync for Once {}
@@ -24,13 +203,7 @@ const COMPLETE: usize = 0x3;
 
 const STATE_MASK: usize = 0x3;
 
-#[repr(align(4))]
-struct Waiter {
-    signaled: AtomicBool,
-    next: *const Waiter,
-}
-
-struct WaiterQueue<'a> {
+struct OnceGuard<'a> {
     state_and_queue: &'a AtomicUsize,
     set_state_on_drop_to: usize,
 }
@@ -40,8 +213,7 @@ impl Once {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            state_and_queue: AtomicUsize::new(IMCOMPLETE),
-            _marker: marker::PhantomData,
+            state: AtomicUsize::new(IMCOMPLETE),
         }
     }
     pub fn call_once<F>(&self, f: F)
@@ -71,13 +243,12 @@ impl Once {
     }
 
     pub fn is_completed(&self) -> bool {
-        self.state_and_queue.load(Ordering::Acquire) == COMPLETE
+        self.state.load(Ordering::Acquire) == COMPLETE
     }
 
     #[cold]
     fn call_inner(&self, ignore_poisoning: bool, init: &mut dyn FnMut(&OnceState)) {
-        let _intr_lock = CPUS.intr_lock();
-        let mut state_and_queue = self.state_and_queue.load(Ordering::Acquire);
+        let mut state_and_queue = self.state.load(Ordering::Acquire);
         loop {
             match state_and_queue {
                 COMPLETE => break,
@@ -85,7 +256,7 @@ impl Once {
                     panic!("Once instance has previously poisoned");
                 }
                 POISONED | IMCOMPLETE => {
-                    let exchange_result = self.state_and_queue.compare_exchange(
+                    let exchange_result = self.state.compare_exchange(
                         state_and_queue,
                         RUNNING,
                         Ordering::Acquire,
@@ -95,8 +266,8 @@ impl Once {
                         state_and_queue = old;
                         continue;
                     };
-                    let mut waiter_queue = WaiterQueue {
-                        state_and_queue: &self.state_and_queue,
+                    let mut once_guard = OnceGuard {
+                        state_and_queue: &self.state,
                         set_state_on_drop_to: POISONED,
                     };
                     let init_state = OnceState {
@@ -104,62 +275,25 @@ impl Once {
                         set_state_on_drop_to: Cell::new(COMPLETE),
                     };
                     init(&init_state);
-                    waiter_queue.set_state_on_drop_to = init_state.set_state_on_drop_to.get();
+                    once_guard.set_state_on_drop_to = init_state.set_state_on_drop_to.get();
                     break;
                 }
                 _ => {
                     assert!(state_and_queue & STATE_MASK == RUNNING);
-                    wait(&self.state_and_queue, state_and_queue);
-                    state_and_queue = self.state_and_queue.load(Ordering::Acquire);
+                    state_and_queue = self.state.load(Ordering::Acquire);
+                    core::hint::spin_loop();
                 }
             }
         }
     }
 }
 
-fn wait(state_and_queue: &AtomicUsize, mut current_state: usize) {
-    loop {
-        if current_state & STATE_MASK != RUNNING {
-            return;
-        }
-
-        let node = Waiter {
-            signaled: AtomicBool::new(false),
-            next: (current_state & !STATE_MASK) as *const Waiter,
-        };
-        let me = &node as *const Waiter as usize;
-
-        let exchange_result = state_and_queue.compare_exchange(
-            current_state,
-            me | RUNNING,
-            Ordering::Release,
-            Ordering::Relaxed,
-        );
-        if let Err(old) = exchange_result {
-            current_state = old;
-            continue;
-        }
-        while !node.signaled.load(Ordering::Acquire) {
-            core::hint::spin_loop()
-        }
-        break;
-    }
-}
-
-impl Drop for WaiterQueue<'_> {
+impl Drop for OnceGuard<'_> {
     fn drop(&mut self) {
         let state_and_queue = self
             .state_and_queue
             .swap(self.set_state_on_drop_to, Ordering::AcqRel);
         assert_eq!(state_and_queue & STATE_MASK, RUNNING);
-        unsafe {
-            let mut queue = (state_and_queue & !STATE_MASK) as *const Waiter;
-            while !queue.is_null() {
-                let next = (*queue).next;
-                (*queue).signaled.store(true, Ordering::Release);
-                queue = next;
-            }
-        }
     }
 }
 

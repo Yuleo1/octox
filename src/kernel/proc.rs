@@ -1,11 +1,11 @@
 use crate::defs::{as_bytes, as_bytes_mut};
 use crate::file::File;
 use crate::fs::{self, Inode, Path};
-use crate::lazy::{SyncLazy, SyncOnceCell};
 use crate::log::LOG;
 use crate::memlayout::{kstack, TRAMPOLINE, TRAPFLAME};
 use crate::spinlock::{Mutex, MutexGuard};
 use crate::swtch::swtch;
+use crate::sync::{LazyLock, OnceLock};
 use crate::trap::usertrap_ret;
 use crate::vm::{Addr, KVAddr, PageAllocator, UVAddr, Uvm, VirtAddr, KVM};
 use crate::{array, print, println};
@@ -22,8 +22,8 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use core::{cell::UnsafeCell, ops::Drop};
 
 pub static CPUS: Cpus = Cpus::new();
-pub static PROCS: SyncLazy<Procs> = SyncLazy::new(|| Procs::new());
-pub static INITPROC: SyncOnceCell<Arc<Proc>> = SyncOnceCell::new();
+pub static PROCS: LazyLock<Procs> = LazyLock::new(|| Procs::new());
+pub static INITPROC: OnceLock<Arc<Proc>> = OnceLock::new();
 
 // Saved registers for kernel context switches.
 #[derive(Clone, Copy, Debug)]

@@ -1,10 +1,10 @@
 use crate::{
     bio::{BufGuard, BCACHE},
     fs::{BSIZE, SB},
-    lazy::SyncLazy,
     param::{LOGSIZE, MAXOPBLOCKS, ROOTDEV},
     proc::{Process, CPUS, PROCS},
     spinlock::Mutex,
+    sync::LazyLock,
 };
 use core::ops::{Deref, DerefMut};
 
@@ -31,7 +31,7 @@ use core::ops::{Deref, DerefMut};
 //   ...
 // Log appends are synchronous.
 
-pub static LOG: SyncLazy<Mutex<Log>> = SyncLazy::new(|| Mutex::new(Log::new(ROOTDEV), "log"));
+pub static LOG: LazyLock<Mutex<Log>> = LazyLock::new(|| Mutex::new(Log::new(ROOTDEV), "log"));
 
 // Contents of the header block, used for both the on-disk header block
 // and to keep track in memory of logged block# before commit.
