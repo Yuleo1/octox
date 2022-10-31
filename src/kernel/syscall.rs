@@ -57,10 +57,10 @@ impl SysCalls {
         (Self::exit, "(xstatus: i32) -> !"), // exit: Terminate the current process; status reported to wait(). No Return.
         (Self::wait, "(xstatus: &mut i32) -> usize"), // wait: Wait for a child to exit; exit status in &status; retunrs child PID.
         (Self::pipe, "(p: &mut [usize]) -> usize"), // pipe: Create a pipe, put read/write file descpritors in p[0] and p[1].
-        (Self::read, "(fd: usize, b: *mut u8, n: usize) -> usize"), // read: Read n bytes into buf; returns number read; or 0 if end of file
+        (Self::read, "(fd: usize, buf: &mut [u8]) -> usize"), // read: Read n bytes into buf; returns number read; or 0 if end of file
         (Self::kill, "(pid: usize) -> usize"), // kill: Terminate process PID. Returns 0, or -1 for Error
         (Self::exec, "(filename: &str, argv: &[&str]) -> usize"), // exec: Load a file and execute it with arguments; only returns if error.
-        (Self::fstat, "(fd: usize, st: &mut stat) -> usize"), // fstat: Place info about an open file into st.
+        (Self::fstat, "(fd: usize, st: &mut Stat) -> usize"), // fstat: Place info about an open file into st.
         (Self::chdir, "(dirname: &str) -> usize"), // chdir: Change the current directory.
         (Self::dup, "(fd: usize) -> usize"), // dup: Return a new file descpritor referring to the same file as fd.
         (Self::getpid, "() -> usize"),       // getpid: Return the current process's PID.
@@ -68,9 +68,9 @@ impl SysCalls {
         (Self::sleep, "(n: usize) -> usize"), // sleep: Pause for n clock ticks.
         (Self::uptime, "() -> usize"),       // uptime: Return how many clock ticks since start.
         (Self::open, "(filename: &str, flags: usize) -> usize"), // open: Open a file; flags indicate read/write; returns an fd.
-        (Self::write, "(fd: usize, b: *const u8, n: usize) -> usize"), // write: Write n bytes from buf to file descpritor fd; returns n.
+        (Self::write, "(fd: usize, b: &[u8]) -> usize"), // write: Write n bytes from buf to file descpritor fd; returns n.
         (Self::mknod, "(file: &str, mj: usize, mi: usize) -> usize"), // mknod: Create a device file
-        (Self::unlink, "(file: &str) -> usize"),                      // unlink: Remove a file
+        (Self::unlink, "(file: &str) -> usize"),         // unlink: Remove a file
         (Self::link, "(file1: &str, file2: &str) -> usize"), // link: Create another name (file2) for the file file1.
         (Self::mkdir, "(dir: &str) -> usize"),               // mkdir: Create a new directory.
         (Self::close, "(fd: usize) -> usize"),               // close: Release open file fd.
@@ -555,35 +555,46 @@ impl SysCalls {
             .into_iter()
     }
     fn signature(self) -> String {
-        format!(
-            "extern \"C\" fn {}{}",
-            self.fn_name(),
-            Self::TABLE[self as usize].1,
-        )
+        format!("fn {}{}", self.fn_name(), Self::TABLE[self as usize].1,)
     }
     fn fn_name(&self) -> String {
         format!("{:?}", self).to_lowercase()
     }
+    fn args(&self) -> Vec<(&'static str, &'static str)> {
+        match Self::TABLE[*self as usize].1.find(") -> usize") {
+            Some(_) => Self::TABLE[*self as usize].1.strip_suffix(") -> usize"),
+            _ => Self::TABLE[*self as usize].1.strip_suffix(") -> !"),
+        }
+        .unwrap()
+        .strip_prefix("(")
+        .unwrap()
+        .split(",")
+        .filter_map(|s| s.trim().split_once(": "))
+        .collect::<Vec<(&str, &str)>>()
+    }
 
     fn gen_usys(self) -> String {
+        let arguments = self.args();
         format!(
-            r#"#[naked]
-#[no_mangle]
+            r#"
 pub {} {{
+    let ret: isize;
     unsafe {{
         asm!(
             "li a7, {{syscall}}",
             "ecall",
             "ret",
             syscall = const {},
-            options(noreturn),
+            inlateout("a0") _ => ret
         );
     }}
+    ret
 }}
-
+{:?}
 "#,
             self.signature(),
             self as usize,
+            arguments,
         )
     }
 }

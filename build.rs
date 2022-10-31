@@ -32,6 +32,7 @@ fn main() {
     usys_rs
         .write_all(
             "// Created by build.rs\n\
+                use crate::stat::*;\n\
                 use core::arch::asm;\n\n"
                 .as_bytes(),
         )
