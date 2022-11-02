@@ -53,27 +53,27 @@ pub enum SysCalls {
 impl SysCalls {
     const TABLE: [(fn() -> Result<usize, ()>, &'static str); variant_count::<Self>()] = [
         (Self::invalid, ""),
-        (Self::fork, "() -> usize"), // fork: Create a process, return child's PID.
+        (Self::fork, "() -> isize"), // fork: Create a process, return child's PID.
         (Self::exit, "(xstatus: i32) -> !"), // exit: Terminate the current process; status reported to wait(). No Return.
-        (Self::wait, "(xstatus: &mut i32) -> usize"), // wait: Wait for a child to exit; exit status in &status; retunrs child PID.
-        (Self::pipe, "(p: &mut [usize]) -> usize"), // pipe: Create a pipe, put read/write file descpritors in p[0] and p[1].
-        (Self::read, "(fd: usize, buf: &mut [u8]) -> usize"), // read: Read n bytes into buf; returns number read; or 0 if end of file
-        (Self::kill, "(pid: usize) -> usize"), // kill: Terminate process PID. Returns 0, or -1 for Error
-        (Self::exec, "(filename: &str, argv: &[&str]) -> usize"), // exec: Load a file and execute it with arguments; only returns if error.
-        (Self::fstat, "(fd: usize, st: &mut Stat) -> usize"), // fstat: Place info about an open file into st.
-        (Self::chdir, "(dirname: &str) -> usize"), // chdir: Change the current directory.
-        (Self::dup, "(fd: usize) -> usize"), // dup: Return a new file descpritor referring to the same file as fd.
-        (Self::getpid, "() -> usize"),       // getpid: Return the current process's PID.
-        (Self::sbrk, "(n: usize) -> usize"), // sbrk: Grow process's memory by n bytes. Returns start fo new memory.
-        (Self::sleep, "(n: usize) -> usize"), // sleep: Pause for n clock ticks.
-        (Self::uptime, "() -> usize"),       // uptime: Return how many clock ticks since start.
-        (Self::open, "(filename: &str, flags: usize) -> usize"), // open: Open a file; flags indicate read/write; returns an fd.
-        (Self::write, "(fd: usize, b: &[u8]) -> usize"), // write: Write n bytes from buf to file descpritor fd; returns n.
-        (Self::mknod, "(file: &str, mj: usize, mi: usize) -> usize"), // mknod: Create a device file
-        (Self::unlink, "(file: &str) -> usize"),         // unlink: Remove a file
-        (Self::link, "(file1: &str, file2: &str) -> usize"), // link: Create another name (file2) for the file file1.
-        (Self::mkdir, "(dir: &str) -> usize"),               // mkdir: Create a new directory.
-        (Self::close, "(fd: usize) -> usize"),               // close: Release open file fd.
+        (Self::wait, "(xstatus: &mut i32) -> isize"), // wait: Wait for a child to exit; exit status in &status; retunrs child PID.
+        (Self::pipe, "(p: &mut [usize]) -> isize"), // pipe: Create a pipe, put read/write file descpritors in p[0] and p[1].
+        (Self::read, "(fd: usize, buf: &mut [u8]) -> isize"), // read: Read n bytes into buf; returns number read; or 0 if end of file
+        (Self::kill, "(pid: usize) -> isize"), // kill: Terminate process PID. Returns 0, or -1 for Error
+        (Self::exec, "(filename: &str, argv: &[&str]) -> isize"), // exec: Load a file and execute it with arguments; only returns if error.
+        (Self::fstat, "(fd: usize, st: &mut Stat) -> isize"), // fstat: Place info about an open file into st.
+        (Self::chdir, "(dirname: &str) -> isize"), // chdir: Change the current directory.
+        (Self::dup, "(fd: usize) -> isize"), // dup: Return a new file descpritor referring to the same file as fd.
+        (Self::getpid, "() -> isize"),       // getpid: Return the current process's PID.
+        (Self::sbrk, "(n: usize) -> isize"), // sbrk: Grow process's memory by n bytes. Returns start fo new memory.
+        (Self::sleep, "(n: usize) -> isize"), // sleep: Pause for n clock ticks.
+        (Self::uptime, "() -> isize"),       // uptime: Return how many clock ticks since start.
+        (Self::open, "(filename: &str, flags: isize) -> isize"), // open: Open a file; flags indicate read/write; returns an fd.
+        (Self::write, "(fd: usize, b: &[u8]) -> isize"), // write: Write n bytes from buf to file descpritor fd; returns n.
+        (Self::mknod, "(file: &str, mj: usize, mi: usize) -> isize"), // mknod: Create a device file
+        (Self::unlink, "(file: &str) -> isize"),         // unlink: Remove a file
+        (Self::link, "(file1: &str, file2: &str) -> isize"), // link: Create another name (file2) for the file file1.
+        (Self::mkdir, "(dir: &str) -> isize"),               // mkdir: Create a new directory.
+        (Self::close, "(fd: usize) -> isize"),               // close: Release open file fd.
     ];
     fn invalid() -> Result<usize, ()> {
         unreachable!()
@@ -93,6 +93,12 @@ pub fn syscall() {
         }
         _ => SysCalls::TABLE[syscall_id as usize].0().unwrap_or(-1 as isize as usize),
     }
+}
+
+#[repr(C)]
+struct Slice {
+    ptr: usize,
+    len: usize,
 }
 
 #[cfg(target_os = "none")]
@@ -128,6 +134,10 @@ impl ProcData {
         }
         self.uvm.as_mut().unwrap().copyin(buf, addr).and(Ok(0))
     }
+
+    //    pub fn fetch_slice<'a>(&mut self, addr: UVAddr) -> &[T] {
+    //        todo!()
+    //    }
 
     // Fetch the str at addr from the current process.
     // Return &str or Err
@@ -561,8 +571,8 @@ impl SysCalls {
         format!("{:?}", self).to_lowercase()
     }
     fn args(&self) -> Vec<(&'static str, &'static str)> {
-        match Self::TABLE[*self as usize].1.find(") -> usize") {
-            Some(_) => Self::TABLE[*self as usize].1.strip_suffix(") -> usize"),
+        match Self::TABLE[*self as usize].1.find(") -> isize") {
+            Some(_) => Self::TABLE[*self as usize].1.strip_suffix(") -> isize"),
             _ => Self::TABLE[*self as usize].1.strip_suffix(") -> !"),
         }
         .unwrap()
@@ -574,27 +584,57 @@ impl SysCalls {
     }
 
     fn gen_usys(self) -> String {
-        let arguments = self.args();
-        format!(
+        let mut i = 0;
+        let part1 = format!(
             r#"
 pub {} {{
     let ret: isize;
     unsafe {{
         asm!(
-            "li a7, {{syscall}}",
             "ecall",
-            "ret",
-            syscall = const {},
-            inlateout("a0") _ => ret
+            "#,
+            self.signature(),
+        );
+        let mut part2 = self
+            .args()
+            .iter()
+            .map(|s| match s {
+                (_, s1) if s1.contains("&str") | s1.contains("&[") | s1.contains("&mut [") => {
+                    let ret = format!("in(a{}) &{} as *const _ as usize,\n            ", i, s.0);
+                    i += 1;
+                    ret
+                }
+                (_, s1) if s1.contains(']') == false && s1.contains("&mut ") => {
+                    let ret = format!("in(a{}) {} as *mut _ as usize,\n            ", i, s.0);
+                    i += 1;
+                    ret
+                }
+                (_, s1) if s1.contains(']') == false && s1.contains("&") => {
+                    let ret = format!("in(a{}) {} as *const _ as usize,\n            ", i, s.0);
+                    i += 1;
+                    ret
+                }
+                (_, _) => {
+                    let ret = format!("in(a{}) {},\n            ", i, s.0);
+                    i += 1;
+                    ret
+                }
+            })
+            .collect::<Vec<String>>();
+        let part3 = format!(
+            r#"in(a7) {},
+            lateout("a0") ret,
         );
     }}
     ret
 }}
-{:?}
 "#,
-            self.signature(),
-            self as usize,
-            arguments,
-        )
+            self as usize
+        );
+        let mut gen: Vec<String> = Vec::new();
+        gen.push(part1);
+        gen.append(&mut part2);
+        gen.push(part3);
+        gen.iter().map(|s| s.chars()).flatten().collect::<String>()
     }
 }
