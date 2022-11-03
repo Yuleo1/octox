@@ -590,7 +590,7 @@ impl SysCalls {
         let part1 = format!(
             r#"
 pub {} {{
-    let ret: isize;
+    let _ret: isize;
     unsafe {{
         asm!(
             "ecall",{}"#,
@@ -603,7 +603,7 @@ pub {} {{
             .map(|s| match s {
                 (_, s1) if s1.contains("&str") | s1.contains("&[") | s1.contains("&mut [") => {
                     let ret = format!(
-                        "{:indent$}in(a{}) &{} as *const _ as usize,\n",
+                        "{:indent$}in(\"a{}\") &{} as *const _ as usize,\n",
                         "",
                         i,
                         s.0,
@@ -614,7 +614,7 @@ pub {} {{
                 }
                 (_, s1) if s1.contains(']') == false && s1.contains("&mut ") => {
                     let ret = format!(
-                        "{:indent$}in(a{}) {} as *mut _ as usize,\n",
+                        "{:indent$}in(\"a{}\") {} as *mut _ as usize,\n",
                         "",
                         i,
                         s.0,
@@ -625,7 +625,7 @@ pub {} {{
                 }
                 (_, s1) if s1.contains(']') == false && s1.contains("&") => {
                     let ret = format!(
-                        "{:indent$}in(a{}) {} as *const _ as usize,\n",
+                        "{:indent$}in(\"a{}\") {} as *const _ as usize,\n",
                         "",
                         i,
                         s.0,
@@ -635,28 +635,43 @@ pub {} {{
                     ret
                 }
                 (_, _) => {
-                    let ret = format!("{:indent$}in(a{}) {},\n", "", i, s.0, indent = indent * 3);
+                    let ret = format!(
+                        "{:indent$}in(\"a{}\") {},\n",
+                        "",
+                        i,
+                        s.0,
+                        indent = indent * 3
+                    );
                     i += 1;
                     ret
                 }
             })
             .collect::<Vec<String>>();
         let part3 = format!(
-            r#"{:indent$}in(a7) {},
-            lateout("a0") ret,
+            r#"{:indent$}in("a7") {},
+            lateout("a0") _ret,
         );
     }}
-    ret
-}}
 "#,
             "",
             self as usize,
             indent = indent * 3
         );
+        let part4 = format!(
+            "{:indent$}{}\n}}",
+            "",
+            if Self::TABLE[self as usize].1.contains(") -> isize") {
+                "_ret"
+            } else {
+                "unreachable!()"
+            },
+            indent = indent
+        );
         let mut gen: Vec<String> = Vec::new();
         gen.push(part1);
         gen.append(&mut part2);
         gen.push(part3);
+        gen.push(part4);
         gen.iter().map(|s| s.chars()).flatten().collect::<String>()
     }
 }
