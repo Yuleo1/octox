@@ -95,12 +95,6 @@ pub fn syscall() {
     }
 }
 
-#[repr(C)]
-struct Slice {
-    ptr: usize,
-    len: usize,
-}
-
 #[cfg(target_os = "none")]
 type RawFd = usize;
 #[cfg(target_os = "none")]
@@ -135,22 +129,29 @@ impl ProcData {
         self.uvm.as_mut().unwrap().copyin(buf, addr).and(Ok(0))
     }
 
-    //    pub fn fetch_slice<'a>(&mut self, addr: UVAddr) -> &[T] {
-    //        todo!()
-    //    }
+    pub unsafe fn fetch_slice<T>(&mut self, addr: UVAddr, buf: &mut [T]) -> Result<usize, ()> {
+        let mut data: UVAddr = UVAddr::from(0);
+        let mut len: usize = 0;
+        self.fetch_data(addr, &mut data)?;
+        self.fetch_data(addr + core::mem::size_of::<usize>(), &mut len)?;
+        if len > buf.len() || len == 0 || data.into_usize() == 0 {
+            return Err(());
+        }
+        self.uvm.as_mut().unwrap().copyin(buf, data).and(Ok(0))
+    }
 
     // Fetch the str at addr from the current process.
     // Return &str or Err
     pub fn fetch_str<'a>(&mut self, addr: UVAddr, buf: &'a mut [u8]) -> Result<&'a str, ()> {
         unsafe {
-            self.fetch_data(addr, buf)?;
+            self.fetch_slice(addr, buf)?;
         }
         Ok(core::str::from_utf8_mut(buf)
             .or(Err(()))?
             .trim_end_matches(char::from(0)))
     }
 
-    // Fetch the nth word-sized system call argument as a null-terminated string.
+    // Fetch the nth word-sized system call argument as a str.
     // Copies into buf.
     // Return string length if OK (including nul), or Err
     pub fn arg_str<'a>(&mut self, n: usize, buf: &'a mut [u8]) -> Result<&'a str, ()> {
@@ -585,51 +586,72 @@ impl SysCalls {
 
     fn gen_usys(self) -> String {
         let mut i = 0;
+        let indent = 4;
         let part1 = format!(
             r#"
 pub {} {{
     let ret: isize;
     unsafe {{
         asm!(
-            "ecall",
-            "#,
+            "ecall",{}"#,
             self.signature(),
+            "\n",
         );
         let mut part2 = self
             .args()
             .iter()
             .map(|s| match s {
                 (_, s1) if s1.contains("&str") | s1.contains("&[") | s1.contains("&mut [") => {
-                    let ret = format!("in(a{}) &{} as *const _ as usize,\n            ", i, s.0);
+                    let ret = format!(
+                        "{:indent$}in(a{}) &{} as *const _ as usize,\n",
+                        "",
+                        i,
+                        s.0,
+                        indent = indent * 3
+                    );
                     i += 1;
                     ret
                 }
                 (_, s1) if s1.contains(']') == false && s1.contains("&mut ") => {
-                    let ret = format!("in(a{}) {} as *mut _ as usize,\n            ", i, s.0);
+                    let ret = format!(
+                        "{:indent$}in(a{}) {} as *mut _ as usize,\n",
+                        "",
+                        i,
+                        s.0,
+                        indent = indent * 3
+                    );
                     i += 1;
                     ret
                 }
                 (_, s1) if s1.contains(']') == false && s1.contains("&") => {
-                    let ret = format!("in(a{}) {} as *const _ as usize,\n            ", i, s.0);
+                    let ret = format!(
+                        "{:indent$}in(a{}) {} as *const _ as usize,\n",
+                        "",
+                        i,
+                        s.0,
+                        indent = indent * 3
+                    );
                     i += 1;
                     ret
                 }
                 (_, _) => {
-                    let ret = format!("in(a{}) {},\n            ", i, s.0);
+                    let ret = format!("{:indent$}in(a{}) {},\n", "", i, s.0, indent = indent * 3);
                     i += 1;
                     ret
                 }
             })
             .collect::<Vec<String>>();
         let part3 = format!(
-            r#"in(a7) {},
+            r#"{:indent$}in(a7) {},
             lateout("a0") ret,
         );
     }}
     ret
 }}
 "#,
-            self as usize
+            "",
+            self as usize,
+            indent = indent * 3
         );
         let mut gen: Vec<String> = Vec::new();
         gen.push(part1);

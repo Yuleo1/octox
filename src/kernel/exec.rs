@@ -138,9 +138,9 @@ pub fn exec(path: &Path, argv: [Option<String>; MAXARG]) -> Result<usize, ()> {
     let exec = || -> Result<usize, ()> {
         res?;
         let p = CPUS.my_proc().unwrap();
-        let proc_data = unsafe { &mut *p.data.get() };
+        let proc_data = p.data_mut();
         let tf = proc_data.trapframe.as_mut().unwrap();
-        let oldsz = unsafe { (&*p.data.get()).sz };
+        let oldsz = proc_data.sz;
 
         // Allocate two pages at the next page boundary.
         // Make the first inaccessible as a stack guard.
@@ -152,8 +152,8 @@ pub fn exec(path: &Path, argv: [Option<String>; MAXARG]) -> Result<usize, ()> {
             .alloc(sz, sz + 2 * PGSIZE, pteflags::PTE_W)
             .ok_or(())?;
         uvm.as_mut().unwrap().clear(From::from(sz - 2 * PGSIZE));
-        let mut sp = sz;
-        let stackbase = sp - PGSIZE;
+        let mut sp: UVAddr = UVAddr::from(sz);
+        let stackbase: UVAddr = sp - PGSIZE;
 
         // Push argument strings, prepare rest of stack in ustack.
         let mut argc = 0;
@@ -163,29 +163,34 @@ pub fn exec(path: &Path, argv: [Option<String>; MAXARG]) -> Result<usize, ()> {
             .filter_map(|s| s)
         {
             sp -= arg.len();
-            sp -= sp % 16; // riscv sp must be 16-byte aligned
+            sp -= sp.into_usize() % 16; // riscv sp must be 16-byte aligned
             if sp < stackbase {
                 return Err(());
             }
-            unsafe { uvm.as_mut().unwrap().copyout(From::from(sp), &arg) }?;
-            *ustack.get_mut(argc).ok_or(())? = sp;
+            // copyout &str(= "...") to sp
+            unsafe { uvm.as_mut().unwrap().copyout(sp, arg.as_str()) }?;
+            // make &str from sp ( &&str ) and len, and store it in ustack.
+            *ustack.get_mut(argc * 2).ok_or(())? = sp.into_usize();
+            *ustack.get_mut(argc * 2 + 1).ok_or(())? = arg.len();
             argc += 1;
         }
         argc += 1;
-        *ustack.get_mut(argc).ok_or(())? = 0;
+        //*ustack.get_mut(argc).ok_or(())? = 0;
 
         // Push array of argv[] pointers.
-        sp -= (argc + 1) * size_of::<usize>();
-        sp -= sp % 16;
+        // sp = &[&str].as_ptr
+        // argc = len
+        sp -= argc * 2 * size_of::<usize>();
+        sp -= sp.into_usize() % 16;
         if sp < stackbase {
             return Err(());
         }
-        unsafe { uvm.as_mut().unwrap().copyout(UVAddr::from(sp), &ustack) }?;
+        unsafe { uvm.as_mut().unwrap().copyout(sp, &ustack[0..(argc * 2)]) }?;
 
         // arguments to user main(argc, argv)
         // argc is returned via the system call return
         // value, which goes in a0.
-        unsafe { &mut *p.data.get() }.trapframe.as_mut().unwrap().a1 = sp;
+        tf.a1 = sp.into_usize();
 
         // Save program name for debugging.
         match path.file_name() {
@@ -197,7 +202,7 @@ pub fn exec(path: &Path, argv: [Option<String>; MAXARG]) -> Result<usize, ()> {
         let olduvm = proc_data.uvm.replace(uvm.take().unwrap());
         proc_data.sz = sz;
         tf.epc = elf.e_entry; // initial program counter = main
-        tf.sp = sp; // initial stack pointer
+        tf.sp = sp.into_usize(); // initial stack pointer
         olduvm.unwrap().proc_uvmfree(oldsz);
 
         Ok(argc) // this ends up in a0, the first argument to main(argc, argv)

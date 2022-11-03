@@ -7,7 +7,7 @@ use alloc::boxed::Box;
 use core::cmp::{Ord, PartialEq, PartialOrd};
 use core::convert::From;
 use core::marker::PhantomData;
-use core::ops::{Add, AddAssign, Deref, DerefMut, Index, IndexMut, Sub};
+use core::ops::{Add, AddAssign, Deref, DerefMut, Index, IndexMut, Sub, SubAssign};
 use core::ptr;
 
 use crate::trampoline::trampoline; // trampoline.rs
@@ -68,6 +68,7 @@ where
         + Add<usize, Output = Self>
         + Sub<usize, Output = Self>
         + AddAssign<usize>
+        + SubAssign<usize>
         + PartialEq
         + Eq
         + Ord
@@ -123,6 +124,11 @@ macro_rules! impl_addr {
             type Output = Self;
             fn sub(self, rhs: usize) -> Self::Output {
                 Self(self.0 - rhs)
+            }
+        }
+        impl SubAssign<usize> for $typ {
+            fn sub_assign(&mut self, other: usize) {
+                self.0 -= other;
             }
         }
         impl Sub for $typ {
