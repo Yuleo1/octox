@@ -62,7 +62,7 @@ impl Uvm {
 
 pub fn exec(path: &Path, argv: [Option<String>; MAXARG]) -> Result<usize, ()> {
     let mut uvm: Option<Box<Uvm>> = None;
-    let mut ustack = [0usize; MAXARG];
+    let mut ustack = [0usize; MAXARG * 2]; // &str = [usize, usize]
     let mut elf: ElfHdr = Default::default();
     let mut res;
     let mut sz = 0;

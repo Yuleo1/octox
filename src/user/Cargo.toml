@@ -24,9 +24,9 @@ path = "lib.rs"
 #name = "init"
 #path = "init.rs"
 #
-#[[bin]]
-#name = "initcode"
-#path = "initcode.rs"
+[[bin]]
+name = "initcode"
+path = "initcode.rs"
 #
 #[[bin]]
 #name = "kill"

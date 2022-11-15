@@ -137,7 +137,11 @@ impl ProcData {
         if len > buf.len() || len == 0 || data.into_usize() == 0 {
             return Err(());
         }
-        self.uvm.as_mut().unwrap().copyin(buf, data).and(Ok(0))
+        self.uvm
+            .as_mut()
+            .unwrap()
+            .copyin(&mut buf[..len], data)
+            .and(Ok(0))
     }
 
     // Fetch the str at addr from the current process.
@@ -471,27 +475,22 @@ impl SysCalls {
             let path = Path::new(data.arg_str(0, &mut path)?);
 
             let mut argv: [Option<String>; MAXARG] = array![None; MAXARG];
-            let uargv = data.arg_addr(1);
-            let mut uarg: UVAddr = From::from(0);
-            let mut uarg_cp_buf: [u8; PGSIZE] = [0u8; PGSIZE];
+            let mut uargv: [Option<&str>; MAXARG] = [None; MAXARG];
+            let mut buf: [u8; PGSIZE] = [0u8; PGSIZE];
 
-            let mut i = 0;
-            loop {
-                match argv.get_mut(i) {
-                    None => return Err(()),
-                    Some(argvi) => {
-                        unsafe { data.fetch_data(uargv + size_of::<usize>() * i, &mut uarg) }?;
+            unsafe { data.fetch_slice(data.arg_addr(1), &mut uargv) }?;
 
-                        if uarg.into_usize() == 0 {
-                            break;
-                        }
-
-                        argvi.replace(data.fetch_str(uarg, &mut uarg_cp_buf)?.to_string());
-                        i += 1;
-                    }
-                }
+            for (i, uarg) in uargv
+                .iter()
+                .take_while(|uarg| uarg.is_some())
+                .filter_map(|uarg| uarg.as_ref())
+                .enumerate()
+            {
+                argv[i].replace(
+                    data.fetch_str(UVAddr::from(uarg as *const _ as usize), &mut buf)?
+                        .to_string(),
+                );
             }
-
             exec(path, argv)
         }
     }

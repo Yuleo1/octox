@@ -6,6 +6,6 @@ pub mod stat;
 pub mod usys;
 
 #[panic_handler]
-fn panic(info: &panic::PanicInfo<'_>) -> ! {
+fn panic(_info: &panic::PanicInfo<'_>) -> ! {
     loop {}
 }

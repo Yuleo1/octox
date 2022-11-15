@@ -1,5 +1,5 @@
 OUTPUT_ARCH( "riscv" )
-ENTRY( _main )
+ENTRY( main )
 
 SECTIONS
 {
@@ -9,7 +9,7 @@ SECTIONS
 		*(.text .text.*)
 	}
 	
-	.rodata: {
+	.rodata : {
 		. = ALIGN(16);
 		*(.srodata .srodata.*)
 		. = ALIGN(16);
