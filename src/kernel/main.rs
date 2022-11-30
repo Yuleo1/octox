@@ -36,7 +36,7 @@ extern "C" fn main() -> ! {
         println!("hart {} starting", unsafe { Cpus::cpu_id() });
         vm::kinithart(); // turn on paging
         trap::inithart(); // install kernel trap vector
-        plic::inithart(); // ask PLIC for device interrups
+        plic::inithart(); // ask PLIC for device interrupts
     }
     scheduler()
 }

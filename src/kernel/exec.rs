@@ -167,9 +167,9 @@ pub fn exec(path: &Path, argv: [Option<String>; MAXARG]) -> Result<usize, ()> {
             if sp < stackbase {
                 return Err(());
             }
-            // copyout &str(= "...") to sp
+            // copyout &str.as_ptr() to sp
             unsafe { uvm.as_mut().unwrap().copyout(sp, arg.as_str()) }?;
-            // make &str from sp ( &&str ) and len, and store it in ustack.
+            // make &str from sp ( &str.as_ptr() ) and len, and store it in ustack.
             *ustack.get_mut(argc * 2).ok_or(())? = sp.into_usize();
             *ustack.get_mut(argc * 2 + 1).ok_or(())? = arg.len();
             argc += 1;
@@ -178,7 +178,7 @@ pub fn exec(path: &Path, argv: [Option<String>; MAXARG]) -> Result<usize, ()> {
         //*ustack.get_mut(argc).ok_or(())? = 0;
 
         // Push array of argv[] pointers.
-        // sp = &[&str].as_ptr
+        // sp = (&[&str]).as_ptr()
         // argc = len
         sp -= argc * 2 * size_of::<usize>();
         sp -= sp.into_usize() % 16;
@@ -187,10 +187,19 @@ pub fn exec(path: &Path, argv: [Option<String>; MAXARG]) -> Result<usize, ()> {
         }
         unsafe { uvm.as_mut().unwrap().copyout(sp, &ustack[0..(argc * 2)]) }?;
 
-        // arguments to user main(argc, argv)
-        // argc is returned via the system call return
-        // value, which goes in a0.
-        tf.a1 = sp.into_usize();
+        // make args: &[&str] from sp: &[&str].as_ptr() and argc(len) at stack
+        let slice: [usize; 2] = [sp.into_usize(), argc];
+        sp -= size_of::<[usize; 2]>();
+        sp -= sp.into_usize() % 16;
+        if sp < stackbase {
+            return Err(());
+        }
+        unsafe { uvm.as_mut().unwrap().copyout(sp, &slice) }?;
+
+        // // arguments to user main(argc, argv)
+        // // argc is returned via the system call return
+        // // value, which goes in a0.
+        // tf.a1 = sp.into_usize();
 
         // Save program name for debugging.
         match path.file_name() {
@@ -205,7 +214,7 @@ pub fn exec(path: &Path, argv: [Option<String>; MAXARG]) -> Result<usize, ()> {
         tf.sp = sp.into_usize(); // initial stack pointer
         olduvm.unwrap().proc_uvmfree(oldsz);
 
-        Ok(argc) // this ends up in a0, the first argument to main(argc, argv)
+        Ok(sp.into_usize()) // this ends up in a0, the first argument to main(args: &[&str])
     };
     res = exec();
 
